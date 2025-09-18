@@ -136,6 +136,7 @@ class TaskManager:
             task.status = TaskStatus.RUNNING
             task.started_at = datetime.now()
             task.add_log("Starting collection task", "info")
+            task.add_log("Task initialization complete", "info")
 
             # Extract parameters
             instruments = task.params.get('instruments', [])
@@ -151,14 +152,18 @@ class TaskManager:
             )
 
             # Check authentication
+            task.add_log("Checking authentication status", "info")
             if not self.auth_manager.is_token_valid():
                 task.add_log("Not authenticated, attempting to refresh token", "warning")
                 if not self.auth_manager.refresh_if_needed():
                     raise Exception("Authentication failed")
+            else:
+                task.add_log("Authentication valid, proceeding with collection", "info")
 
             async with tracker:
                 total_work = sum(len(exp_list) for exp_list in expiries.values())
                 work_done = 0
+                task.add_log(f"Starting collection for {len(instruments)} instruments with {total_work} total expiries", "info")
 
                 # Process each instrument
                 for instrument_name in instruments:

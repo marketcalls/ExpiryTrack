@@ -223,13 +223,6 @@
                             <div id="current-action" class="font-medium text-gray-800">Initializing...</div>
                         </div>
 
-                        <!-- Logs -->
-                        <div class="border border-gray-200 rounded-lg p-4 bg-white h-64 overflow-y-auto">
-                            <div id="collection-logs" class="text-sm space-y-1">
-                                <!-- Logs will be populated here -->
-                            </div>
-                        </div>
-
                         <!-- Completion Actions -->
                         <div id="completion-actions" class="hidden mt-4 text-center">
                             <button onclick="window.location.href='{{ url_for('status_page') }}'" class="btn-supabase mr-4">
@@ -283,24 +276,6 @@
                         <div class="text-lg font-bold text-gray-800" id="stat-errors">0</div>
                         <div class="text-xs text-gray-600">Errors</div>
                     </div>
-                </div>
-
-                <!-- Status -->
-                <div class="card-minimal p-4 border-gray-200 bg-gray-50 mb-4">
-                    <div class="text-sm font-medium text-gray-700" id="current-status">Initializing...</div>
-                </div>
-
-                <!-- Logs -->
-                <div class="border border-gray-200 rounded-lg h-32 overflow-y-auto p-4 bg-gray-50">
-                    <div id="log-container" class="space-y-1 text-sm font-mono">
-                        <!-- Logs will appear here -->
-                    </div>
-                </div>
-
-                <div class="flex justify-end mt-6">
-                    <button type="button" class="btn bg-gray-100 text-gray-700 hover:bg-gray-200 font-medium py-2 px-4 rounded-lg" onclick="closeProgress()" id="close-btn" style="display: none;">
-                        Close
-                    </button>
                 </div>
             </div>
         </div>
@@ -575,17 +550,7 @@ async function updateProgress() {
             document.getElementById('stat-candles').textContent = task.stats.candles || 0;
             document.getElementById('stat-errors').textContent = task.stats.errors || 0;
 
-            // Update status
-            document.getElementById('current-status').textContent = task.current_action || 'Processing...';
-
-            // Update logs
-            if (task.logs && task.logs.length > 0) {
-                updateLogs(task.logs);
-            } else {
-                // Show a placeholder when there are no logs
-                const container = document.getElementById('log-container');
-                container.innerHTML = '<div class="text-xs text-gray-500 italic">No logs available yet...</div>';
-            }
+            // Status updates handled in current-action element above
 
             // Check if completed
             if (task.status === 'completed' || task.status === 'failed') {
@@ -606,22 +571,7 @@ async function updateProgress() {
     }
 }
 
-function updateLogs(logs) {
-    const container = document.getElementById('log-container');
-    container.innerHTML = logs.slice(-20).map(log =>
-        `<div class="text-xs ${getLogColor(log.level)}">[${log.timestamp}] ${log.message}</div>`
-    ).join('');
-    container.scrollTop = container.scrollHeight;
-}
-
-function getLogColor(level) {
-    switch(level) {
-        case 'error': return 'text-red-600';
-        case 'warning': return 'text-yellow-600';
-        case 'success': return 'text-green-600';
-        default: return 'text-gray-600';
-    }
-}
+// Log functions removed - not needed
 
 function startNewCollection() {
     // Hide inline progress

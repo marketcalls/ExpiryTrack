@@ -234,6 +234,11 @@ def api_collect_status(task_id):
 
     status = task_manager.get_task_status(task_id)
     if status:
+        # Debug log to see what's being returned
+        logs_count = len(status.get('logs', []))
+        print(f"DEBUG: Task {task_id} - Status: {status.get('status')}, Logs count: {logs_count}")
+        if logs_count > 0:
+            print(f"DEBUG: Sample log: {status['logs'][-1]}")
         return jsonify(status)
     else:
         return jsonify({'error': 'Task not found'}), 404

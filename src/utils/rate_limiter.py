@@ -193,8 +193,8 @@ class PriorityRateLimiter(UpstoxRateLimiter):
         """
         event = asyncio.Event()
         # Add a unique counter to ensure tuples are always comparable
-        counter = getattr(self, '_counter', 0)
-        self._counter = counter + 1
+        counter = self._counter
+        self._counter += 1
         await self.priority_queue.put((priority, time.time(), counter, event))
 
         if not self.processing:
