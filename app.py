@@ -28,6 +28,11 @@ db = SQLAlchemy(app)
 auth_manager = AuthManager()
 db_manager = DatabaseManager()
 
+# Context processor to make is_authenticated available in all templates
+@app.context_processor
+def inject_auth_status():
+    return {'is_authenticated': auth_manager.is_token_valid()}
+
 @app.route('/')
 def index():
     """Home page"""
@@ -125,29 +130,6 @@ def upstox_callback():
 
     return "No authorization code received", 400
 
-@app.route('/dashboard')
-def dashboard():
-    """Dashboard showing ExpiryTrack status"""
-    if not auth_manager.is_token_valid():
-        return redirect(url_for('index'))
-
-    # Get database stats
-    stats = db_manager.get_summary_stats()
-
-    # Get recent jobs
-    with db_manager.get_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT job_type, status, started_at, completed_at
-            FROM job_status
-            ORDER BY id DESC
-            LIMIT 10
-        """)
-        recent_jobs = [dict(row) for row in cursor.fetchall()]
-
-    return render_template('dashboard.html',
-                         stats=stats,
-                         recent_jobs=recent_jobs)
 
 @app.route('/api/expiries/<instrument>')
 def api_expiries(instrument):
@@ -172,6 +154,42 @@ def api_expiries(instrument):
         'instrument': instrument,
         'instrument_key': instrument_key,
         'expiries': expiries
+    })
+
+@app.route('/api/instruments/expiries', methods=['POST'])
+def api_instruments_expiries():
+    """API endpoint to get expiries for multiple instruments"""
+    if not auth_manager.is_token_valid():
+        return jsonify({'error': 'Not authenticated'}), 401
+
+    data = request.json
+    if not data or 'instruments' not in data:
+        return jsonify({'error': 'Missing instruments list'}), 400
+
+    instruments = data['instruments']
+    if not isinstance(instruments, list) or not instruments:
+        return jsonify({'error': 'Invalid instruments list'}), 400
+
+    async def get_all_expiries():
+        tracker = ExpiryTracker(auth_manager=auth_manager)
+        async with tracker:
+            expiries_data = {}
+            for instrument in instruments:
+                try:
+                    instrument_key = get_instrument_key(instrument)
+                    expiries = await tracker.get_expiries(instrument_key)
+                    expiries_data[instrument] = expiries
+                except Exception as e:
+                    expiries_data[instrument] = []
+            return expiries_data
+
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    expiries_data = loop.run_until_complete(get_all_expiries())
+    loop.close()
+
+    return jsonify({
+        'expiries': expiries_data
     })
 
 @app.route('/collect')
@@ -203,6 +221,7 @@ def api_collect_start():
     task_id = task_manager.create_task(data)
 
     return jsonify({
+        'success': True,
         'task_id': task_id,
         'status': 'started',
         'message': 'Collection task started'
@@ -245,6 +264,11 @@ def status_page():
     tasks.sort(key=lambda x: x.get('created_at', ''), reverse=True)
 
     return render_template('status.html', stats=stats, tasks=tasks[:10])  # Show last 10 tasks
+
+@app.route('/help')
+def help_page():
+    """Help page with CLI commands and OpenAlgo documentation"""
+    return render_template('help.html')
 
 @app.route('/logout')
 def logout():

@@ -24,9 +24,28 @@ ExpiryTrack is a modern web application that systematically collects, stores, an
 ### Prerequisites
 
 - Python 3.8 or higher
+- **Upstox Plus Plan** (Required for expired contract data access)
 - Upstox Developer Account ([Get it here](https://api.upstox.com/))
 - 4GB RAM (8GB recommended)
 - 10GB+ free disk space
+
+### ⚠️ Important: Upstox Plus Plan Required
+
+**ExpiryTrack requires the Upstox Plus Plan to access expired contract data.** The Basic Plan does not provide access to historical data for expired derivatives contracts.
+
+#### About Upstox Plus Plan:
+- **Free activation** initially (may become chargeable in future with advance notice)
+- Access to advanced features and enhanced API capabilities
+- Priority access to historical data for expired contracts
+- Can switch between Plus and Basic plans anytime (24-hour cooling period applies)
+
+#### How to Activate:
+1. Log into your Upstox account
+2. Navigate to Settings → Plans
+3. Activate the Plus Plan (currently free)
+4. Wait for plan activation confirmation
+
+For complete details, see the [Upstox Plus Plan Terms](https://upstox.com/files/terms-and-condition/plus-pack.pdf)
 
 ### Installation
 
@@ -372,6 +391,12 @@ This project is licensed under the GNU Affero General Public License v3.0 - see 
 - **GitHub Repository**: [https://github.com/marketcalls/ExpiryTrack](https://github.com/marketcalls/ExpiryTrack)
 - **Upstox Developer**: [https://api.upstox.com/](https://api.upstox.com/)
 - **Documentation**: [Design Docs](./design/)
+
+---
+
+## 📄 Disclaimer
+
+**Disclaimer:** ExpiryTrack is an independent, open-source application developed by individual developers. We are not affiliated with, endorsed by, or associated with Upstox or any of its brands, subsidiaries, or related entities. This application uses publicly available Upstox APIs for educational and research purposes. All trademarks, logos, and brand names are the property of their respective owners. Users are responsible for compliance with Upstox's terms of service and API usage policies.
 
 ---
 

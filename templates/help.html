@@ -1,0 +1,591 @@
+{% extends "base.html" %}
+
+{% block title %}Help - ExpiryTrack{% endblock %}
+
+{% block content %}
+<div class="max-w-6xl mx-auto">
+    <!-- Header -->
+    <div class="mb-8">
+        <h1 class="text-3xl font-bold supabase-text-gradient mb-2">ExpiryTrack Help</h1>
+        <p class="text-gray-600">Complete guide to CLI commands and OpenAlgo symbology</p>
+    </div>
+
+    <!-- Table of Contents -->
+    <div class="card-minimal p-6 mb-8">
+        <h2 class="text-xl font-semibold mb-4">📋 Quick Navigation</h2>
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <a href="#cli-commands" class="nav-link text-center p-3 rounded-lg border hover:border-green-400">
+                <div class="text-2xl mb-2">🖥️</div>
+                <div class="font-medium">CLI Commands</div>
+            </a>
+            <a href="#openalgo-symbols" class="nav-link text-center p-3 rounded-lg border hover:border-green-400">
+                <div class="text-2xl mb-2">🔤</div>
+                <div class="font-medium">OpenAlgo Symbols</div>
+            </a>
+            <a href="#data-export" class="nav-link text-center p-3 rounded-lg border hover:border-green-400">
+                <div class="text-2xl mb-2">📤</div>
+                <div class="font-medium">Data Export</div>
+            </a>
+            <a href="#query-examples" class="nav-link text-center p-3 rounded-lg border hover:border-green-400">
+                <div class="text-2xl mb-2">🔍</div>
+                <div class="font-medium">Query Examples</div>
+            </a>
+        </div>
+    </div>
+
+    <!-- CLI Commands Section -->
+    <section id="cli-commands" class="mb-12">
+        <div class="card-minimal p-6 mb-6">
+            <h2 class="text-2xl font-semibold mb-4">🖥️ CLI Commands</h2>
+            <p class="text-gray-600 mb-6">ExpiryTrack provides a comprehensive command-line interface for advanced users.</p>
+
+            <!-- Main CLI Tool -->
+            <div class="mb-8">
+                <h3 class="text-xl font-semibold mb-4">Main CLI Tool - <code class="bg-gray-100 px-2 py-1 rounded">main.py</code></h3>
+
+                <div class="space-y-6">
+                    <!-- Setup -->
+                    <div class="border-l-4 border-green-500 pl-4">
+                        <h4 class="font-semibold text-lg mb-2">🔧 Setup & Authentication</h4>
+                        <div class="space-y-3">
+                            <div>
+                                <code class="block bg-gray-900 text-green-400 p-3 rounded-lg mb-2">python main.py setup</code>
+                                <p class="text-sm text-gray-600">Configure Upstox API credentials (stored encrypted in database)</p>
+                            </div>
+                            <div>
+                                <code class="block bg-gray-900 text-green-400 p-3 rounded-lg mb-2">python main.py authenticate</code>
+                                <p class="text-sm text-gray-600">Authenticate with Upstox API using stored credentials</p>
+                            </div>
+                            <div>
+                                <code class="block bg-gray-900 text-green-400 p-3 rounded-lg mb-2">python main.py test</code>
+                                <p class="text-sm text-gray-600">Test API connection and verify authentication</p>
+                            </div>
+                            <div>
+                                <code class="block bg-gray-900 text-green-400 p-3 rounded-lg mb-2">python main.py clear-auth</code>
+                                <p class="text-sm text-gray-600">Clear stored authentication tokens</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Data Collection -->
+                    <div class="border-l-4 border-blue-500 pl-4">
+                        <h4 class="font-semibold text-lg mb-2">📊 Data Collection</h4>
+                        <div class="space-y-3">
+                            <div>
+                                <code class="block bg-gray-900 text-green-400 p-3 rounded-lg mb-2">python main.py get-expiries NIFTY</code>
+                                <p class="text-sm text-gray-600">Fetch all available expiries for an instrument (NIFTY, BANKNIFTY, SENSEX)</p>
+                            </div>
+                            <div>
+                                <code class="block bg-gray-900 text-green-400 p-3 rounded-lg mb-2">python main.py get-contracts NIFTY 2024-03-28</code>
+                                <p class="text-sm text-gray-600">Fetch all contracts for a specific instrument and expiry date</p>
+                            </div>
+                            <div>
+                                <code class="block bg-gray-900 text-green-400 p-3 rounded-lg mb-2">python main.py collect --instruments NIFTY BANKNIFTY --workers 5</code>
+                                <p class="text-sm text-gray-600">Collect all expired contract data for specified instruments</p>
+                            </div>
+                            <div>
+                                <code class="block bg-gray-900 text-green-400 p-3 rounded-lg mb-2">python main.py resume</code>
+                                <p class="text-sm text-gray-600">Resume incomplete data collection tasks</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Database Management -->
+                    <div class="border-l-4 border-purple-500 pl-4">
+                        <h4 class="font-semibold text-lg mb-2">🗄️ Database Management</h4>
+                        <div class="space-y-3">
+                            <div>
+                                <code class="block bg-gray-900 text-green-400 p-3 rounded-lg mb-2">python main.py status</code>
+                                <p class="text-sm text-gray-600">Show database status and statistics</p>
+                            </div>
+                            <div>
+                                <code class="block bg-gray-900 text-green-400 p-3 rounded-lg mb-2">python main.py optimize</code>
+                                <p class="text-sm text-gray-600">Optimize database performance (VACUUM for SQLite)</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Data Export Tool -->
+            <div class="mb-8">
+                <h3 class="text-xl font-semibold mb-4">Export Tool - <code class="bg-gray-100 px-2 py-1 rounded">export_openalgo_data.py</code></h3>
+
+                <div class="space-y-6">
+                    <!-- Basic Export -->
+                    <div class="border-l-4 border-orange-500 pl-4">
+                        <h4 class="font-semibold text-lg mb-2">📤 Basic Export</h4>
+                        <div class="space-y-3">
+                            <div>
+                                <code class="block bg-gray-900 text-green-400 p-3 rounded-lg mb-2">python export_openalgo_data.py NIFTY28MAR24FUT</code>
+                                <p class="text-sm text-gray-600">Export single symbol to CSV (default format)</p>
+                            </div>
+                            <div>
+                                <code class="block bg-gray-900 text-green-400 p-3 rounded-lg mb-2">python export_openalgo_data.py NIFTY28MAR2420800CE --format excel</code>
+                                <p class="text-sm text-gray-600">Export to Excel format with two sheets (data + metadata)</p>
+                            </div>
+                            <div>
+                                <code class="block bg-gray-900 text-green-400 p-3 rounded-lg mb-2">python export_openalgo_data.py BANKNIFTY28MAR2447500PE --format json</code>
+                                <p class="text-sm text-gray-600">Export to JSON format with structured data</p>
+                            </div>
+                            <div>
+                                <code class="block bg-gray-900 text-green-400 p-3 rounded-lg mb-2">python export_openalgo_data.py SENSEX30APR24FUT --output my_exports</code>
+                                <p class="text-sm text-gray-600">Export to custom directory</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Batch Export -->
+                    <div class="border-l-4 border-red-500 pl-4">
+                        <h4 class="font-semibold text-lg mb-2">🔍 Search & Batch Export</h4>
+                        <div class="space-y-3">
+                            <div>
+                                <code class="block bg-gray-900 text-green-400 p-3 rounded-lg mb-2">python export_openalgo_data.py --search NIFTY28MAR24</code>
+                                <p class="text-sm text-gray-600">Search for all NIFTY March 2024 contracts</p>
+                            </div>
+                            <div>
+                                <code class="block bg-gray-900 text-green-400 p-3 rounded-lg mb-2">python export_openalgo_data.py --search NIFTY28MAR24 --auto --format excel</code>
+                                <p class="text-sm text-gray-600">Export all matching contracts with auto-confirmation</p>
+                            </div>
+                            <div>
+                                <code class="block bg-gray-900 text-green-400 p-3 rounded-lg mb-2">python export_openalgo_data.py --search 22600 --auto</code>
+                                <p class="text-sm text-gray-600">Export all 22600 strike options across instruments</p>
+                            </div>
+                            <div>
+                                <code class="block bg-gray-900 text-green-400 p-3 rounded-lg mb-2">python export_openalgo_data.py --demo</code>
+                                <p class="text-sim text-gray-600">Run demo examples to see available data</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Other Tools -->
+            <div class="mb-8">
+                <h3 class="text-xl font-semibold mb-4">Additional Tools</h3>
+
+                <div class="space-y-4">
+                    <div>
+                        <code class="block bg-gray-900 text-green-400 p-3 rounded-lg mb-2">python demo_openalgo_queries.py</code>
+                        <p class="text-sm text-gray-600">Run interactive demo of OpenAlgo symbol queries and examples</p>
+                    </div>
+                    <div>
+                        <code class="block bg-gray-900 text-green-400 p-3 rounded-lg mb-2">python update_openalgo_symbols.py</code>
+                        <p class="text-sm text-gray-600">Update OpenAlgo symbols for existing contracts in database</p>
+                    </div>
+                    <div>
+                        <code class="block bg-gray-900 text-green-400 p-3 rounded-lg mb-2">python test_openalgo_symbols.py</code>
+                        <p class="text-sm text-gray-600">Test OpenAlgo symbol generation and validation</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- OpenAlgo Symbols Section -->
+    <section id="openalgo-symbols" class="mb-12">
+        <div class="card-minimal p-6 mb-6">
+            <h2 class="text-2xl font-semibold mb-4">🔤 OpenAlgo Symbol Format</h2>
+            <p class="text-gray-600 mb-6">OpenAlgo symbols provide a standardized, user-friendly format for F&O symbols that makes querying intuitive and efficient.</p>
+
+            <!-- Futures Format -->
+            <div class="mb-8">
+                <h3 class="text-xl font-semibold mb-4">📈 Futures Format</h3>
+                <div class="bg-gray-50 p-4 rounded-lg mb-4">
+                    <code class="text-lg font-mono">[BaseSymbol][DDMMMYY]FUT</code>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div class="space-y-3">
+                        <h4 class="font-semibold">Examples:</h4>
+                        <div class="space-y-2">
+                            <div class="border-l-4 border-blue-500 pl-3">
+                                <code class="font-mono text-green-600">NIFTY28MAR24FUT</code>
+                                <p class="text-sm text-gray-600">Nifty futures expiring March 28, 2024</p>
+                            </div>
+                            <div class="border-l-4 border-blue-500 pl-3">
+                                <code class="font-mono text-green-600">BANKNIFTY25APR24FUT</code>
+                                <p class="text-sm text-gray-600">Bank Nifty futures expiring April 25, 2024</p>
+                            </div>
+                            <div class="border-l-4 border-blue-500 pl-3">
+                                <code class="font-mono text-green-600">SENSEX30APR24FUT</code>
+                                <p class="text-sm text-gray-600">Sensex futures expiring April 30, 2024</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="space-y-3">
+                        <h4 class="font-semibold">Format Breakdown:</h4>
+                        <div class="space-y-2 text-sm">
+                            <div><span class="font-mono bg-yellow-100 px-1">BaseSymbol</span> - Instrument name (NIFTY, BANKNIFTY, etc.)</div>
+                            <div><span class="font-mono bg-green-100 px-1">DD</span> - Expiry day (01-31)</div>
+                            <div><span class="font-mono bg-blue-100 px-1">MMM</span> - Expiry month (JAN, FEB, MAR, etc.)</div>
+                            <div><span class="font-mono bg-purple-100 px-1">YY</span> - Expiry year (24, 25, etc.)</div>
+                            <div><span class="font-mono bg-red-100 px-1">FUT</span> - Contract type identifier</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Options Format -->
+            <div class="mb-8">
+                <h3 class="text-xl font-semibold mb-4">📊 Options Format</h3>
+                <div class="bg-gray-50 p-4 rounded-lg mb-4">
+                    <code class="text-lg font-mono">[BaseSymbol][DDMMMYY][Strike][CE/PE]</code>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div class="space-y-3">
+                        <h4 class="font-semibold">Examples:</h4>
+                        <div class="space-y-2">
+                            <div class="border-l-4 border-green-500 pl-3">
+                                <code class="font-mono text-green-600">NIFTY28MAR2420800CE</code>
+                                <p class="text-sm text-gray-600">Nifty 20800 Call expiring March 28, 2024</p>
+                            </div>
+                            <div class="border-l-4 border-red-500 pl-3">
+                                <code class="font-mono text-red-600">NIFTY28MAR2420800PE</code>
+                                <p class="text-sm text-gray-600">Nifty 20800 Put expiring March 28, 2024</p>
+                            </div>
+                            <div class="border-l-4 border-green-500 pl-3">
+                                <code class="font-mono text-green-600">BANKNIFTY25APR2447500CE</code>
+                                <p class="text-sm text-gray-600">Bank Nifty 47500 Call expiring April 25, 2024</p>
+                            </div>
+                            <div class="border-l-4 border-red-500 pl-3">
+                                <code class="font-mono text-red-600">SENSEX30APR2468000PE</code>
+                                <p class="text-sm text-gray-600">Sensex 68000 Put expiring April 30, 2024</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="space-y-3">
+                        <h4 class="font-semibold">Format Breakdown:</h4>
+                        <div class="space-y-2 text-sm">
+                            <div><span class="font-mono bg-yellow-100 px-1">BaseSymbol</span> - Instrument name</div>
+                            <div><span class="font-mono bg-green-100 px-1">DDMMMYY</span> - Expiry date</div>
+                            <div><span class="font-mono bg-orange-100 px-1">Strike</span> - Strike price (no decimals)</div>
+                            <div><span class="font-mono bg-green-100 px-1">CE</span> - Call option</div>
+                            <div><span class="font-mono bg-red-100 px-1">PE</span> - Put option</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Supported Instruments -->
+            <div class="mb-8">
+                <h3 class="text-xl font-semibold mb-4">🏪 Supported Base Symbols</h3>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                        <h4 class="font-semibold mb-3 text-orange-600">NSE Index Instruments</h4>
+                        <div class="space-y-2">
+                            <div class="flex justify-between items-center p-2 bg-gray-50 rounded">
+                                <code class="font-mono">NIFTY</code>
+                                <span class="text-sm text-gray-600">Nifty 50</span>
+                            </div>
+                            <div class="flex justify-between items-center p-2 bg-gray-50 rounded">
+                                <code class="font-mono">BANKNIFTY</code>
+                                <span class="text-sm text-gray-600">Bank Nifty</span>
+                            </div>
+                            <div class="flex justify-between items-center p-2 bg-gray-50 rounded">
+                                <code class="font-mono">FINNIFTY</code>
+                                <span class="text-sm text-gray-600">Fin Nifty</span>
+                            </div>
+                            <div class="flex justify-between items-center p-2 bg-gray-50 rounded">
+                                <code class="font-mono">MIDCPNIFTY</code>
+                                <span class="text-sm text-gray-600">Midcap Nifty</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div>
+                        <h4 class="font-semibold mb-3 text-blue-600">BSE Index Instruments</h4>
+                        <div class="space-y-2">
+                            <div class="flex justify-between items-center p-2 bg-gray-50 rounded">
+                                <code class="font-mono">SENSEX</code>
+                                <span class="text-sm text-gray-600">Sensex</span>
+                            </div>
+                            <div class="flex justify-between items-center p-2 bg-gray-50 rounded">
+                                <code class="font-mono">BANKEX</code>
+                                <span class="text-sm text-gray-600">Bankex</span>
+                            </div>
+                            <div class="flex justify-between items-center p-2 bg-gray-50 rounded">
+                                <code class="font-mono">SENSEX50</code>
+                                <span class="text-sm text-gray-600">Sensex 50</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Data Export Section -->
+    <section id="data-export" class="mb-12">
+        <div class="card-minimal p-6 mb-6">
+            <h2 class="text-2xl font-semibold mb-4">📤 Data Export Guide</h2>
+            <p class="text-gray-600 mb-6">Export your collected historical data in multiple formats using OpenAlgo symbols.</p>
+
+            <!-- Export Formats -->
+            <div class="mb-8">
+                <h3 class="text-xl font-semibold mb-4">📄 Export Formats</h3>
+
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <!-- CSV Format -->
+                    <div class="border border-gray-200 rounded-lg p-4">
+                        <h4 class="font-semibold text-green-600 mb-2">CSV Format</h4>
+                        <p class="text-sm text-gray-600 mb-3">Simple tabular format for analysis tools</p>
+                        <div class="text-xs">
+                            <div class="bg-gray-100 p-2 rounded mb-2">
+                                <code>timestamp,open,high,low,close,volume,open_interest</code>
+                            </div>
+                            <ul class="text-gray-500 space-y-1">
+                                <li>• Compatible with Excel, Python pandas</li>
+                                <li>• Lightweight and fast</li>
+                                <li>• Universal format</li>
+                            </ul>
+                        </div>
+                    </div>
+
+                    <!-- Excel Format -->
+                    <div class="border border-gray-200 rounded-lg p-4">
+                        <h4 class="font-semibold text-blue-600 mb-2">Excel Format</h4>
+                        <p class="text-sm text-gray-600 mb-3">Rich format with metadata sheets</p>
+                        <div class="text-xs">
+                            <div class="bg-gray-100 p-2 rounded mb-2">
+                                <div>Sheet 1: Historical Data</div>
+                                <div>Sheet 2: Contract Info</div>
+                            </div>
+                            <ul class="text-gray-500 space-y-1">
+                                <li>• Two sheets with data and metadata</li>
+                                <li>• Professional presentation</li>
+                                <li>• Easy to share and analyze</li>
+                            </ul>
+                        </div>
+                    </div>
+
+                    <!-- JSON Format -->
+                    <div class="border border-gray-200 rounded-lg p-4">
+                        <h4 class="font-semibold text-purple-600 mb-2">JSON Format</h4>
+                        <p class="text-sm text-gray-600 mb-3">Structured format for APIs and apps</p>
+                        <div class="text-xs">
+                            <div class="bg-gray-100 p-2 rounded mb-2">
+                                <code>{"contract": {...}, "data": [...]}</code>
+                            </div>
+                            <ul class="text-gray-500 space-y-1">
+                                <li>• Structured with contract metadata</li>
+                                <li>• API and web application friendly</li>
+                                <li>• Preserves data types</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Usage Examples -->
+            <div class="mb-8">
+                <h3 class="text-xl font-semibold mb-4">💡 Usage Examples</h3>
+
+                <div class="space-y-6">
+                    <!-- Quick Export -->
+                    <div class="border-l-4 border-green-500 pl-4">
+                        <h4 class="font-semibold mb-2">Quick Single Export</h4>
+                        <code class="block bg-gray-900 text-green-400 p-3 rounded-lg mb-2">
+python export_openalgo_data.py NIFTY28MAR2420800CE
+                        </code>
+                        <p class="text-sm text-gray-600">Exports specific option contract to CSV in exports/ directory</p>
+                    </div>
+
+                    <!-- Custom Format -->
+                    <div class="border-l-4 border-blue-500 pl-4">
+                        <h4 class="font-semibold mb-2">Custom Format & Location</h4>
+                        <code class="block bg-gray-900 text-green-400 p-3 rounded-lg mb-2">
+python export_openalgo_data.py BANKNIFTY28MAR24FUT --format excel --output my_data
+                        </code>
+                        <p class="text-sm text-gray-600">Exports futures contract to Excel format in my_data/ directory</p>
+                    </div>
+
+                    <!-- Batch Export -->
+                    <div class="border-l-4 border-purple-500 pl-4">
+                        <h4 class="font-semibold mb-2">Batch Export with Search</h4>
+                        <code class="block bg-gray-900 text-green-400 p-3 rounded-lg mb-2">
+python export_openalgo_data.py --search NIFTY28MAR24 --format json --auto
+                        </code>
+                        <p class="text-sm text-gray-600">Finds and exports all NIFTY March 28, 2024 contracts to JSON</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Output Details -->
+            <div class="mb-8">
+                <h3 class="text-xl font-semibold mb-4">📁 Output Structure</h3>
+
+                <div class="bg-gray-50 p-4 rounded-lg">
+                    <h4 class="font-semibold mb-2">File Naming Convention:</h4>
+                    <code class="text-sm">
+exports/[SYMBOL]_[YYYYMMDD]_[HHMMSS].[ext]
+                    </code>
+
+                    <h4 class="font-semibold mt-4 mb-2">Example Output:</h4>
+                    <div class="text-sm space-y-1 font-mono">
+                        <div>📄 NIFTY28MAR2420800CE_20240918_143022.csv</div>
+                        <div>📊 BANKNIFTY28MAR24FUT_20240918_143055.xlsx</div>
+                        <div>📋 SENSEX30APR24FUT_20240918_143120.json</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Query Examples Section -->
+    <section id="query-examples" class="mb-12">
+        <div class="card-minimal p-6 mb-6">
+            <h2 class="text-2xl font-semibold mb-4">🔍 Query Examples</h2>
+            <p class="text-gray-600 mb-6">Learn how to query your collected data using OpenAlgo symbols.</p>
+
+            <!-- Python Examples -->
+            <div class="mb-8">
+                <h3 class="text-xl font-semibold mb-4">🐍 Python Database Queries</h3>
+
+                <div class="space-y-6">
+                    <div class="border-l-4 border-blue-500 pl-4">
+                        <h4 class="font-semibold mb-2">Get Specific Contract</h4>
+                        <code class="block bg-gray-900 text-green-400 p-3 rounded-lg mb-2">
+# Get specific contract data
+contract = db.get_contract_by_openalgo_symbol('NIFTY28MAR2420800CE')
+                        </code>
+                        <p class="text-sm text-gray-600">Retrieves contract information for Nifty 20800 Call option</p>
+                    </div>
+
+                    <div class="border-l-4 border-green-500 pl-4">
+                        <h4 class="font-semibold mb-2">Get All Contracts for Symbol</h4>
+                        <code class="block bg-gray-900 text-green-400 p-3 rounded-lg mb-2">
+# Get all BANKNIFTY contracts
+contracts = db.get_contracts_by_base_symbol('BANKNIFTY')
+                        </code>
+                        <p class="text-sm text-gray-600">Returns all Bank Nifty contracts in database</p>
+                    </div>
+
+                    <div class="border-l-4 border-purple-500 pl-4">
+                        <h4 class="font-semibold mb-2">Get Option Chain</h4>
+                        <code class="block bg-gray-900 text-green-400 p-3 rounded-lg mb-2">
+# Get option chain for specific expiry
+chain = db.get_option_chain('NIFTY', '2024-03-28')
+                        </code>
+                        <p class="text-sm text-gray-600">Gets all call and put options for Nifty expiring March 28, 2024</p>
+                    </div>
+
+                    <div class="border-l-4 border-orange-500 pl-4">
+                        <h4 class="font-semibold mb-2">Search Symbols</h4>
+                        <code class="block bg-gray-900 text-green-400 p-3 rounded-lg mb-2">
+# Search for contracts containing pattern
+results = db.search_openalgo_symbols('MAR24')
+                        </code>
+                        <p class="text-sm text-gray-600">Finds all contracts expiring in March 2024</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- SQL Examples -->
+            <div class="mb-8">
+                <h3 class="text-xl font-semibold mb-4">🗃️ Direct SQL Queries</h3>
+
+                <div class="space-y-6">
+                    <div class="border-l-4 border-red-500 pl-4">
+                        <h4 class="font-semibold mb-2">Get Specific Option</h4>
+                        <code class="block bg-gray-900 text-green-400 p-3 rounded-lg mb-2">
+SELECT * FROM contracts
+WHERE openalgo_symbol = 'NIFTY28MAR2420800CE';
+                        </code>
+                        <p class="text-sm text-gray-600">Direct SQL query for specific option contract</p>
+                    </div>
+
+                    <div class="border-l-4 border-yellow-500 pl-4">
+                        <h4 class="font-semibold mb-2">Get Option Chain for Date</h4>
+                        <code class="block bg-gray-900 text-green-400 p-3 rounded-lg mb-2">
+SELECT * FROM contracts
+WHERE openalgo_symbol LIKE 'BANKNIFTY%MAR24%'
+AND (openalgo_symbol LIKE '%CE' OR openalgo_symbol LIKE '%PE');
+                        </code>
+                        <p class="text-sm text-gray-600">All Bank Nifty options expiring in March 2024</p>
+                    </div>
+
+                    <div class="border-l-4 border-indigo-500 pl-4">
+                        <h4 class="font-semibold mb-2">Get Historical Data with Symbol</h4>
+                        <code class="block bg-gray-900 text-green-400 p-3 rounded-lg mb-2">
+SELECT h.timestamp, h.open, h.high, h.low, h.close, h.volume,
+       c.openalgo_symbol
+FROM historical_data h
+JOIN contracts c ON h.expired_instrument_key = c.expired_instrument_key
+WHERE c.openalgo_symbol = 'NIFTY28MAR2420800CE'
+ORDER BY h.timestamp;
+                        </code>
+                        <p class="text-sm text-gray-600">Historical OHLCV data for specific contract with OpenAlgo symbol</p>
+                    </div>
+
+                    <div class="border-l-4 border-pink-500 pl-4">
+                        <h4 class="font-semibold mb-2">Get All Futures</h4>
+                        <code class="block bg-gray-900 text-green-400 p-3 rounded-lg mb-2">
+SELECT * FROM contracts
+WHERE openalgo_symbol LIKE '%FUT'
+ORDER BY expiry_date;
+                        </code>
+                        <p class="text-sm text-gray-600">All futures contracts ordered by expiry date</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Benefits -->
+            <div class="mb-8">
+                <h3 class="text-xl font-semibold mb-4">✨ Benefits of OpenAlgo Symbology</h3>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div class="space-y-4">
+                        <div class="flex items-start space-x-3">
+                            <div class="w-2 h-2 bg-green-500 rounded-full mt-2"></div>
+                            <div>
+                                <h4 class="font-semibold">User-Friendly Format</h4>
+                                <p class="text-sm text-gray-600">No complex instrument keys - human readable symbols</p>
+                            </div>
+                        </div>
+                        <div class="flex items-start space-x-3">
+                            <div class="w-2 h-2 bg-blue-500 rounded-full mt-2"></div>
+                            <div>
+                                <h4 class="font-semibold">Consistent Naming</h4>
+                                <p class="text-sm text-gray-600">Standardized format across all instruments and exchanges</p>
+                            </div>
+                        </div>
+                        <div class="flex items-start space-x-3">
+                            <div class="w-2 h-2 bg-purple-500 rounded-full mt-2"></div>
+                            <div>
+                                <h4 class="font-semibold">Easy to Remember</h4>
+                                <p class="text-sm text-gray-600">Intuitive format that's easy to type and remember</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="space-y-4">
+                        <div class="flex items-start space-x-3">
+                            <div class="w-2 h-2 bg-orange-500 rounded-full mt-2"></div>
+                            <div>
+                                <h4 class="font-semibold">Direct SQL Queries</h4>
+                                <p class="text-sm text-gray-600">Query without complex joins or lookups</p>
+                            </div>
+                        </div>
+                        <div class="flex items-start space-x-3">
+                            <div class="w-2 h-2 bg-red-500 rounded-full mt-2"></div>
+                            <div>
+                                <h4 class="font-semibold">Trading Platform Compatible</h4>
+                                <p class="text-sm text-gray-600">Similar to formats used by trading platforms</p>
+                            </div>
+                        </div>
+                        <div class="flex items-start space-x-3">
+                            <div class="w-2 h-2 bg-yellow-500 rounded-full mt-2"></div>
+                            <div>
+                                <h4 class="font-semibold">Indexed for Performance</h4>
+                                <p class="text-sm text-gray-600">Database indexed on OpenAlgo symbols for fast queries</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+</div>
+{% endblock %}

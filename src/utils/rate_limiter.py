@@ -182,6 +182,7 @@ class PriorityRateLimiter(UpstoxRateLimiter):
         super().__init__(*args, **kwargs)
         self.priority_queue = asyncio.PriorityQueue()
         self.processing = False
+        self._counter = 0
 
     async def acquire_with_priority(self, priority: int = 5) -> None:
         """
@@ -191,7 +192,10 @@ class PriorityRateLimiter(UpstoxRateLimiter):
             priority: Request priority (1=highest, 10=lowest)
         """
         event = asyncio.Event()
-        await self.priority_queue.put((priority, time.time(), event))
+        # Add a unique counter to ensure tuples are always comparable
+        counter = getattr(self, '_counter', 0)
+        self._counter = counter + 1
+        await self.priority_queue.put((priority, time.time(), counter, event))
 
         if not self.processing:
             asyncio.create_task(self._process_queue())
@@ -203,7 +207,7 @@ class PriorityRateLimiter(UpstoxRateLimiter):
         self.processing = True
 
         while not self.priority_queue.empty():
-            priority, timestamp, event = await self.priority_queue.get()
+            priority, timestamp, counter, event = await self.priority_queue.get()
             await self.acquire()
             event.set()
 

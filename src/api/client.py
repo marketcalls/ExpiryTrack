@@ -39,11 +39,11 @@ class UpstoxAPIClient:
             'base_url': self.base_url,
             'timeout': httpx.Timeout(config.REQUEST_TIMEOUT),
             'limits': httpx.Limits(
-                max_keepalive_connections=20,
-                max_connections=50,
+                max_keepalive_connections=5,
+                max_connections=10,
                 keepalive_expiry=30
             ),
-            'http2': True  # Enable HTTP/2
+            'http2': False  # Disable HTTP/2 to avoid potential issues
         }
 
         self._client: Optional[httpx.AsyncClient] = None

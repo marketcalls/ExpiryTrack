@@ -1,118 +1,113 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Settings - ExpiryTrack</title>
-    <link href="https://cdn.jsdelivr.net/npm/daisyui@4.4.24/dist/full.min.css" rel="stylesheet" type="text/css" />
-    <script src="https://cdn.tailwindcss.com"></script>
-</head>
-<body data-theme="light">
-    <!-- Navbar -->
-    <div class="navbar bg-base-200">
-        <div class="flex-1">
-            <a class="btn btn-ghost text-xl">📈 ExpiryTrack Settings</a>
-        </div>
-        <div class="flex-none">
-            <ul class="menu menu-horizontal px-1">
-                <li><a href="/">Home</a></li>
-                <li><a href="/settings" class="active">Settings</a></li>
-                {% if credential %}
-                <li><a href="/dashboard">Dashboard</a></li>
-                {% endif %}
-            </ul>
-        </div>
-    </div>
+{% extends "base.html" %}
 
-    <div class="container mx-auto p-6 max-w-2xl">
-        <div class="card bg-base-100 shadow-xl">
-            <div class="card-body">
-                <h2 class="card-title text-2xl mb-4">API Configuration</h2>
+{% block title %}Settings - ExpiryTrack{% endblock %}
 
-                <div class="alert alert-info mb-6">
-                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="stroke-current shrink-0 w-6 h-6"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                    <div>
-                        <h3 class="font-bold">How to get API credentials:</h3>
-                        <ol class="text-sm mt-2 list-decimal list-inside">
-                            <li>Go to <a href="https://upstox.com/developer/apps" target="_blank" class="link">Upstox Developer Console</a></li>
-                            <li>Create a new app or select existing one</li>
-                            <li>Copy the API Key and API Secret</li>
-                            <li>Set Redirect URL as: <code class="bg-base-200 px-1">http://127.0.0.1:5000/upstox/callback</code></li>
-                        </ol>
+{% block content %}
+    <div class="max-w-2xl mx-auto">
+        <!-- Plus Plan Requirement Warning -->
+        <div class="card-minimal p-6 mb-6 border-amber-200 bg-amber-50">
+            <div class="flex items-start space-x-3">
+                <div class="flex-shrink-0">
+                    <div class="w-6 h-6 bg-amber-500 text-white rounded-full flex items-center justify-center text-sm font-bold">!</div>
+                </div>
+                <div>
+                    <h3 class="font-semibold text-amber-800 mb-2">Upstox Plus Plan Required</h3>
+                    <p class="text-amber-700 text-sm mb-3">
+                        ExpiryTrack requires the <strong>Upstox Plus Plan</strong> to access expired contract data.
+                        The Basic Plan does not provide access to historical data for expired derivatives.
+                    </p>
+                    <div class="text-xs text-amber-600">
+                        <p>• Currently free to activate (may become chargeable with advance notice)</p>
+                        <p>• Can switch between plans anytime (24-hour cooling period)</p>
+                        <p>• Activate in your Upstox account: Settings → Plans</p>
                     </div>
+                    <a href="https://upstox.com/files/terms-and-condition/plus-pack.pdf"
+                       target="_blank"
+                       class="inline-block mt-2 text-amber-800 underline text-sm hover:text-amber-900">
+                        View Plus Plan Terms →
+                    </a>
+                </div>
+            </div>
+        </div>
+
+        <div class="card-minimal">
+            <div class="p-8">
+                <h2 class="text-2xl font-semibold mb-6">API Configuration</h2>
+
+                <div class="card-minimal p-4 mb-6 border-blue-200 bg-blue-50">
+                    <h3 class="font-semibold text-blue-800 mb-2">How to get API credentials:</h3>
+                    <ol class="text-sm text-blue-700 space-y-1 list-decimal list-inside">
+                        <li>Go to <a href="https://upstox.com/developer/apps" target="_blank" class="underline hover:text-blue-900">Upstox Developer Console</a></li>
+                        <li>Create a new app or select existing one</li>
+                        <li>Copy the API Key and API Secret</li>
+                        <li>Set Redirect URL as: <code class="bg-blue-100 px-2 py-1 rounded">http://127.0.0.1:5000/upstox/callback</code></li>
+                    </ol>
                 </div>
 
-                <form action="/save_credentials" method="POST">
-                    <div class="form-control mb-4">
-                        <label class="label">
-                            <span class="label-text">API Key (Client ID)</span>
+                <form action="/save_credentials" method="POST" class="space-y-6">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">
+                            API Key (Client ID)
                         </label>
                         <input type="text" name="api_key" placeholder="Enter your API Key"
-                               class="input input-bordered"
+                               class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
                                value="{{ credential.api_key if credential else '' }}" required />
                     </div>
 
-                    <div class="form-control mb-4">
-                        <label class="label">
-                            <span class="label-text">API Secret</span>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">
+                            API Secret
                         </label>
                         <input type="password" name="api_secret" placeholder="Enter your API Secret"
-                               class="input input-bordered"
+                               class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
                                value="{{ credential.api_secret if credential else '' }}" required />
-                        <label class="label">
-                            <span class="label-text-alt">Keep this secret and never share it!</span>
-                        </label>
+                        <p class="text-xs text-gray-500 mt-1">Keep this secret and never share it!</p>
                     </div>
 
-                    <div class="form-control mb-6">
-                        <label class="label">
-                            <span class="label-text">Redirect URL</span>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">
+                            Redirect URL
                         </label>
                         <input type="text" name="redirect_url" placeholder="Redirect URL"
-                               class="input input-bordered"
+                               class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
                                value="{{ credential.redirect_url if credential else 'http://127.0.0.1:5000/upstox/callback' }}" required />
-                        <label class="label">
-                            <span class="label-text-alt">Add this exact URL to your Upstox app settings</span>
-                        </label>
+                        <p class="text-xs text-gray-500 mt-1">Add this exact URL to your Upstox app settings</p>
                     </div>
 
-                    <div class="divider">Rate Limits</div>
-
-                    <div class="stats shadow mb-6 w-full">
-                        <div class="stat">
-                            <div class="stat-title">Per Second</div>
-                            <div class="stat-value text-primary">50</div>
-                            <div class="stat-desc">requests/sec</div>
-                        </div>
-                        <div class="stat">
-                            <div class="stat-title">Per Minute</div>
-                            <div class="stat-value text-secondary">500</div>
-                            <div class="stat-desc">requests/min</div>
-                        </div>
-                        <div class="stat">
-                            <div class="stat-title">Per 30 Minutes</div>
-                            <div class="stat-value text-accent">2000</div>
-                            <div class="stat-desc">requests/30min</div>
+                    <div class="border-t pt-6 mt-6">
+                        <h3 class="text-sm font-medium text-gray-700 mb-4">Rate Limits</h3>
+                        <div class="grid grid-cols-3 gap-4 text-center">
+                            <div>
+                                <div class="text-2xl font-bold text-gray-800">50</div>
+                                <div class="text-xs text-gray-600">requests/sec</div>
+                            </div>
+                            <div>
+                                <div class="text-2xl font-bold text-gray-800">500</div>
+                                <div class="text-xs text-gray-600">requests/min</div>
+                            </div>
+                            <div>
+                                <div class="text-2xl font-bold text-gray-800">2000</div>
+                                <div class="text-xs text-gray-600">requests/30min</div>
+                            </div>
                         </div>
                     </div>
 
-                    <div class="card-actions justify-end">
-                        <button type="submit" class="btn btn-primary">Save Settings</button>
+                    <div class="flex gap-4 justify-end pt-6">
+                        <button type="submit" class="btn-supabase">Save Settings</button>
                         {% if credential %}
-                        <a href="/login" class="btn btn-success">Login with Upstox</a>
+                        <a href="/login" class="btn bg-green-100 text-green-700 hover:bg-green-200 font-medium py-2 px-4 rounded-lg">Login with Upstox</a>
                         {% endif %}
                     </div>
                 </form>
 
                 {% if credential %}
-                <div class="divider mt-6">Status</div>
-                <div class="alert alert-success">
-                    <svg xmlns="http://www.w3.org/2000/svg" class="stroke-current shrink-0 h-6 w-6" fill="none" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                    <span>API credentials configured. You can now login with Upstox!</span>
+                <div class="mt-6 pt-6 border-t">
+                    <div class="card-minimal p-4 border-green-200 bg-green-50">
+                        <span class="text-green-800 font-medium">API credentials configured. You can now login with Upstox!</span>
+                    </div>
                 </div>
                 {% endif %}
             </div>
         </div>
     </div>
-</body>
-</html>
+{% endblock %}

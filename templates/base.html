@@ -3,110 +3,141 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}Upstox Integration{% endblock %}</title>
+    <title>{% block title %}ExpiryTrack{% endblock %}</title>
 
     <!-- TailwindCSS & DaisyUI -->
     <link href="https://cdn.jsdelivr.net/npm/daisyui@4.4.24/dist/full.min.css" rel="stylesheet" type="text/css" />
     <script src="https://cdn.tailwindcss.com"></script>
 
-    <!-- Font Awesome -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-
-    <!-- Custom Styles -->
+    <!-- Custom Styles - Supabase Inspired -->
     <style>
         :root {
-            --upstox-primary: #5E72E4;
-            --upstox-secondary: #2DCE89;
-            --upstox-danger: #F5365C;
-            --upstox-warning: #FB6340;
-            --upstox-info: #11CDEF;
+            --supabase-green: #3ecf8e;
+            --supabase-dark: #1a1a1a;
+            --supabase-gray: #2d2d2d;
+            --supabase-light-gray: #f8f9fa;
+            --supabase-border: #e5e7eb;
+            --supabase-text: #374151;
         }
 
-        .bg-gradient-upstox {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+            background-color: #fafafa;
         }
 
-        .text-gradient {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        .supabase-gradient {
+            background: linear-gradient(135deg, #3ecf8e 0%, #1dd1a1 100%);
+        }
+
+        .supabase-text-gradient {
+            background: linear-gradient(135deg, #3ecf8e 0%, #1dd1a1 100%);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
+            background-clip: text;
         }
 
-        .card-hover {
-            transition: all 0.3s ease;
+        .card-minimal {
+            background: white;
+            border: 1px solid #e5e7eb;
+            border-radius: 12px;
+            box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1);
+            transition: all 0.2s ease;
         }
 
-        .card-hover:hover {
-            transform: translateY(-5px);
-            box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+        .card-minimal:hover {
+            box-shadow: 0 4px 12px 0 rgba(0, 0, 0, 0.15);
+            border-color: #3ecf8e;
         }
 
-        .pulse-animation {
-            animation: pulse 2s infinite;
+        .btn-supabase {
+            background: #3ecf8e;
+            border: none;
+            color: white;
+            font-weight: 500;
+            border-radius: 8px;
+            padding: 8px 16px;
+            transition: all 0.2s ease;
         }
 
-        @keyframes pulse {
-            0% {
-                transform: scale(1);
-            }
-            50% {
-                transform: scale(1.05);
-            }
-            100% {
-                transform: scale(1);
-            }
+        .btn-supabase:hover {
+            background: #2bb77a;
+            transform: translateY(-1px);
+        }
+
+        .navbar-supabase {
+            background: white;
+            border-bottom: 1px solid #e5e7eb;
+            backdrop-filter: blur(8px);
+        }
+
+        .nav-link {
+            color: #374151;
+            font-weight: 500;
+            padding: 8px 16px;
+            border-radius: 8px;
+            transition: all 0.2s ease;
+        }
+
+        .nav-link:hover {
+            background: #f3f4f6;
+            color: #3ecf8e;
+        }
+
+        .nav-link.active {
+            background: #ecfdf5;
+            color: #059669;
         }
     </style>
 </head>
-<body class="bg-base-200 min-h-screen">
+<body class="min-h-screen" style="background-color: #fafafa;">
     <!-- Navbar -->
-    <div class="navbar bg-base-100 shadow-lg">
-        <div class="container mx-auto">
-            <div class="flex-1">
-                <a href="{{ url_for('index') }}" class="btn btn-ghost text-xl">
-                    <i class="fas fa-chart-line text-primary"></i>
-                    <span class="ml-2 font-bold text-gradient">Upstox Connect</span>
-                </a>
-            </div>
-            <div class="flex-none">
-                <ul class="menu menu-horizontal px-1">
-                    <li><a href="{{ url_for('index') }}" class="hover:bg-primary hover:text-white rounded-lg transition-all">
-                        <i class="fas fa-home"></i> Home
-                    </a></li>
-                    <li><a href="{{ url_for('settings') }}" class="hover:bg-primary hover:text-white rounded-lg transition-all">
-                        <i class="fas fa-cog"></i> Settings
-                    </a></li>
-                    {% if session.get('access_token') %}
-                    <li><a href="{{ url_for('dashboard') }}" class="hover:bg-primary hover:text-white rounded-lg transition-all">
-                        <i class="fas fa-tachometer-alt"></i> Dashboard
-                    </a></li>
-                    <li><a href="{{ url_for('logout') }}" class="hover:bg-error hover:text-white rounded-lg transition-all">
-                        <i class="fas fa-sign-out-alt"></i> Logout
-                    </a></li>
+    <nav class="navbar-supabase sticky top-0 z-50">
+        <div class="container mx-auto px-4">
+            <div class="flex items-center justify-between h-16">
+                <div class="flex items-center">
+                    <a href="{{ url_for('index') }}" class="text-2xl font-bold supabase-text-gradient">
+                        ExpiryTrack
+                    </a>
+                </div>
+                <div class="flex items-center space-x-2">
+                    <a href="{{ url_for('index') }}" class="nav-link">
+                        Home
+                    </a>
+                    <a href="{{ url_for('collect_page') }}" class="nav-link">
+                        Collect Data
+                    </a>
+                    <a href="{{ url_for('settings') }}" class="nav-link">
+                        Settings
+                    </a>
+                    <a href="{{ url_for('help_page') }}" class="nav-link">
+                        Help
+                    </a>
+                    {% if is_authenticated %}
+                    <a href="{{ url_for('status_page') }}" class="nav-link">
+                        Status
+                    </a>
+                    <a href="{{ url_for('logout') }}" class="nav-link text-red-600 hover:bg-red-50 hover:text-red-700 font-medium">
+                        Logout
+                    </a>
                     {% endif %}
-                </ul>
+                </div>
             </div>
         </div>
-    </div>
+    </nav>
 
     <!-- Flash Messages -->
     {% with messages = get_flashed_messages(with_categories=true) %}
         {% if messages %}
-            <div class="container mx-auto mt-4 px-4">
+            <div class="container mx-auto mt-6 px-4">
                 {% for category, message in messages %}
-                    <div role="alert" class="alert {% if category == 'success' %}alert-success{% elif category == 'error' %}alert-error{% elif category == 'warning' %}alert-warning{% else %}alert-info{% endif %} mb-4">
-                        <svg xmlns="http://www.w3.org/2000/svg" class="stroke-current shrink-0 h-6 w-6" fill="none" viewBox="0 0 24 24">
-                            {% if category == 'success' %}
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                            {% elif category == 'error' %}
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                            {% else %}
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                            {% endif %}
-                        </svg>
-                        <span>{{ message }}</span>
-                        <div>
-                            <button onclick="this.parentElement.parentElement.remove()" class="btn btn-sm btn-ghost">✕</button>
+                    <div class="card-minimal p-4 mb-4 {% if category == 'success' %}border-green-200 bg-green-50{% elif category == 'error' %}border-red-200 bg-red-50{% elif category == 'warning' %}border-yellow-200 bg-yellow-50{% else %}border-blue-200 bg-blue-50{% endif %}">
+                        <div class="flex items-center justify-between">
+                            <span class="font-medium {% if category == 'success' %}text-green-800{% elif category == 'error' %}text-red-800{% elif category == 'warning' %}text-yellow-800{% else %}text-blue-800{% endif %}">
+                                {{ message }}
+                            </span>
+                            <button onclick="this.parentElement.parentElement.remove()" class="text-gray-400 hover:text-gray-600 text-lg font-bold">
+                                ×
+                            </button>
                         </div>
                     </div>
                 {% endfor %}
@@ -120,14 +151,30 @@
     </main>
 
     <!-- Footer -->
-    <footer class="footer footer-center p-10 bg-base-100 text-base-content mt-auto">
-        <div>
-            <div class="grid grid-flow-col gap-4">
-                <a class="link link-hover" href="https://upstox.com/developer/api-documentation">API Docs</a>
-                <a class="link link-hover" href="https://upstox.com">Upstox</a>
-            </div>
-            <div class="mt-4">
-                <p>Copyright © 2024 - Upstox Integration App</p>
+    <footer class="bg-white border-t border-gray-200 mt-auto">
+        <div class="container mx-auto px-4 py-8">
+            <div class="text-center">
+                <div class="flex justify-center space-x-6 mb-4">
+                    <a class="text-gray-600 hover:text-green-600 text-sm transition-colors" href="https://upstox.com/developer/api-documentation" target="_blank">API Documentation</a>
+                    <a class="text-gray-600 hover:text-green-600 text-sm transition-colors" href="https://account.upstox.com/developer/apps" target="_blank">Developer Console</a>
+                    <a class="text-gray-600 hover:text-green-600 text-sm transition-colors" href="https://github.com/marketcalls" target="_blank">GitHub</a>
+                </div>
+
+                <!-- Disclaimer -->
+                <div class="card-minimal p-4 mb-4 border-gray-200 bg-gray-50 max-w-4xl mx-auto">
+                    <p class="text-xs text-gray-600 leading-relaxed">
+                        <strong>Disclaimer:</strong> ExpiryTrack is an independent, open-source application developed by individual developers.
+                        We are not affiliated with, endorsed by, or associated with Upstox or any of its brands, subsidiaries, or related entities.
+                        This application uses publicly available Upstox APIs for educational and research purposes.
+                        All trademarks, logos, and brand names are the property of their respective owners.
+                        Users are responsible for compliance with Upstox's terms of service and API usage policies.
+                    </p>
+                </div>
+
+                <div class="text-sm text-gray-600">
+                    <p>Copyright © 2025 - <a href="https://marketcalls.in" target="_blank" class="text-green-600 hover:text-green-700 font-medium">Marketcalls</a></p>
+                    <p class="text-xs text-gray-500 mt-1">Open source software built by the community, for the community</p>
+                </div>
             </div>
         </div>
     </footer>

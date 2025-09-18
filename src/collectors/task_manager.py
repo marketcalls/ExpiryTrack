@@ -195,10 +195,9 @@ class TaskManager:
                             if contracts_to_process:
                                 task.current_action = f"Downloading historical data for {len(contracts_to_process)} contracts"
 
-                                # Calculate date range (3 months before expiry)
-                                end_date = expiry_date
+                                # Calculate date range (3 months before expiry to expiry date)
                                 expiry_dt = datetime.strptime(expiry_date, '%Y-%m-%d')
-                                # Go back 3 months from expiry date
+                                end_date = expiry_date
                                 start_dt = expiry_dt - timedelta(days=90)
                                 start_date = start_dt.strftime('%Y-%m-%d')
 
