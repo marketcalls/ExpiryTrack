@@ -170,7 +170,7 @@ class AuthManager:
             print("="*50)
             print("Please configure your Upstox API credentials first.")
             print("You can do this via:")
-            print("1. Web interface: python expirytrack_app.py")
+            print("1. Web interface: python app.py")
             print("2. CLI: python main.py setup")
             print("="*50)
             return False

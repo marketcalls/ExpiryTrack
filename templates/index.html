@@ -1,161 +1,116 @@
-{% extends "base.html" %}
-
-{% block title %}Home - Upstox Integration{% endblock %}
-
-{% block content %}
-<div class="hero min-h-[60vh] bg-gradient-upstox rounded-3xl">
-    <div class="hero-content text-center text-white">
-        <div class="max-w-md">
-            <h1 class="text-5xl font-bold mb-5 animate-pulse">Upstox Connect</h1>
-            <p class="text-lg mb-8">Seamlessly integrate with Upstox API to manage your trading account and view real-time fund details.</p>
-
-            {% if not credentials %}
-            <a href="{{ url_for('settings') }}" class="btn btn-lg btn-secondary">
-                <i class="fas fa-cog mr-2"></i> Configure API Credentials
-            </a>
-            {% elif not session.get('access_token') %}
-            <a href="{{ url_for('login') }}" class="btn btn-lg btn-success pulse-animation">
-                <i class="fas fa-sign-in-alt mr-2"></i> Login with Upstox
-            </a>
-            {% else %}
-            <a href="{{ url_for('dashboard') }}" class="btn btn-lg btn-accent">
-                <i class="fas fa-tachometer-alt mr-2"></i> Go to Dashboard
-            </a>
-            {% endif %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ExpiryTrack - Expired Contract Data Collector</title>
+    <link href="https://cdn.jsdelivr.net/npm/daisyui@4.4.24/dist/full.min.css" rel="stylesheet" type="text/css" />
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body data-theme="light">
+    <!-- Navbar -->
+    <div class="navbar bg-base-200">
+        <div class="flex-1">
+            <a class="btn btn-ghost text-xl">📈 ExpiryTrack</a>
         </div>
-    </div>
-</div>
-
-<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mt-12">
-    <!-- API Status Card -->
-    <div class="card bg-base-100 shadow-xl card-hover">
-        <div class="card-body">
-            <h2 class="card-title">
-                <i class="fas fa-key text-primary"></i>
-                API Configuration
-            </h2>
-            {% if credentials %}
-            <div class="badge badge-success gap-2">
-                <i class="fas fa-check-circle"></i>
-                Configured
-            </div>
-            <p class="text-sm mt-2">API Key: {{ credentials.api_key[:15] }}...</p>
-            {% else %}
-            <div class="badge badge-warning gap-2">
-                <i class="fas fa-exclamation-triangle"></i>
-                Not Configured
-            </div>
-            <p class="text-sm mt-2">Please configure your API credentials</p>
-            {% endif %}
-            <div class="card-actions justify-end">
-                <a href="{{ url_for('settings') }}" class="btn btn-sm btn-primary">
-                    <i class="fas fa-edit"></i> Edit
-                </a>
-            </div>
+        <div class="flex-none">
+            <ul class="menu menu-horizontal px-1">
+                <li><a href="/">Home</a></li>
+                <li><a href="/settings">Settings</a></li>
+                {% if is_authenticated %}
+                <li><a href="/collect">📊 Collect Data</a></li>
+                <li><a href="/logout" class="text-error">Logout</a></li>
+                {% endif %}
+            </ul>
         </div>
     </div>
 
-    <!-- Session Status Card -->
-    <div class="card bg-base-100 shadow-xl card-hover">
-        <div class="card-body">
-            <h2 class="card-title">
-                <i class="fas fa-user-circle text-info"></i>
-                Session Status
-            </h2>
-            {% if session.get('access_token') %}
-            <div class="badge badge-success gap-2">
-                <i class="fas fa-circle"></i>
-                Active
+    <!-- Hero Section -->
+    <div class="hero min-h-screen bg-gradient-to-b from-purple-50 to-white">
+        <div class="hero-content text-center">
+            <div class="max-w-2xl">
+                <h1 class="text-5xl font-bold bg-gradient-to-r from-purple-600 to-blue-600 bg-clip-text text-transparent">
+                    ExpiryTrack
+                </h1>
+                <p class="py-6 text-lg">
+                    Automated Historical Data Collection for Expired Derivatives Contracts
+                </p>
+
+                {% if is_authenticated %}
+                <!-- Authenticated View -->
+                <div class="card bg-base-100 shadow-xl">
+                    <div class="card-body">
+                        <h2 class="card-title text-success">✅ Authenticated</h2>
+
+                        {% if stats %}
+                        <div class="stats shadow">
+                            <div class="stat">
+                                <div class="stat-title">Instruments</div>
+                                <div class="stat-value text-primary">{{ stats.total_instruments }}</div>
+                            </div>
+                            <div class="stat">
+                                <div class="stat-title">Contracts</div>
+                                <div class="stat-value text-secondary">{{ "{:,}".format(stats.total_contracts) }}</div>
+                            </div>
+                            <div class="stat">
+                                <div class="stat-title">Candles</div>
+                                <div class="stat-value text-accent">{{ "{:,}".format(stats.total_candles) }}</div>
+                            </div>
+                        </div>
+                        {% endif %}
+
+                        <div class="card-actions justify-center mt-4">
+                            <a href="/collect" class="btn btn-primary btn-lg">📊 Start Data Collection</a>
+                            <a href="/status" class="btn btn-secondary btn-lg">📈 View Statistics</a>
+                        </div>
+                    </div>
+                </div>
+                {% else %}
+                <!-- Not Authenticated View -->
+                <div class="card bg-base-100 shadow-xl">
+                    <div class="card-body">
+                        <h2 class="card-title">Get Started</h2>
+                        <p>Connect your Upstox account to start collecting expired contract data</p>
+
+                        <div class="alert alert-info mt-4">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="stroke-current shrink-0 w-6 h-6"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                            <span>Make sure you've configured your API credentials in Settings first!</span>
+                        </div>
+
+                        <div class="card-actions justify-center mt-4">
+                            <a href="/settings" class="btn btn-secondary">Configure Settings</a>
+                            <a href="/login" class="btn btn-primary">Login with Upstox</a>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+
+                <!-- Features -->
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mt-12">
+                    <div class="card bg-base-100 shadow">
+                        <div class="card-body">
+                            <h3 class="text-2xl">📊</h3>
+                            <h4 class="font-bold">Complete Coverage</h4>
+                            <p class="text-sm">All options & futures contracts</p>
+                        </div>
+                    </div>
+                    <div class="card bg-base-100 shadow">
+                        <div class="card-body">
+                            <h3 class="text-2xl">⚡</h3>
+                            <h4 class="font-bold">50 req/sec</h4>
+                            <p class="text-sm">High-speed data collection</p>
+                        </div>
+                    </div>
+                    <div class="card bg-base-100 shadow">
+                        <div class="card-body">
+                            <h3 class="text-2xl">💾</h3>
+                            <h4 class="font-bold">Time-Series DB</h4>
+                            <p class="text-sm">Optimized for analysis</p>
+                        </div>
+                    </div>
+                </div>
             </div>
-            <p class="text-sm mt-2">User: {{ session.get('user_name', 'Unknown') }}</p>
-            <div class="card-actions justify-end">
-                <a href="{{ url_for('dashboard') }}" class="btn btn-sm btn-info">
-                    <i class="fas fa-chart-bar"></i> View Funds
-                </a>
-            </div>
-            {% else %}
-            <div class="badge badge-error gap-2">
-                <i class="fas fa-circle"></i>
-                Not Logged In
-            </div>
-            <p class="text-sm mt-2">Please login to access features</p>
-            {% if credentials %}
-            <div class="card-actions justify-end">
-                <a href="{{ url_for('login') }}" class="btn btn-sm btn-success">
-                    <i class="fas fa-sign-in-alt"></i> Login
-                </a>
-            </div>
-            {% endif %}
-            {% endif %}
         </div>
     </div>
-
-    <!-- Last Login Card -->
-    <div class="card bg-base-100 shadow-xl card-hover">
-        <div class="card-body">
-            <h2 class="card-title">
-                <i class="fas fa-history text-warning"></i>
-                Last Activity
-            </h2>
-            {% if user_session %}
-            <div class="badge badge-info gap-2">
-                <i class="fas fa-clock"></i>
-                {{ user_session.created_at.strftime('%Y-%m-%d %H:%M') }}
-            </div>
-            <p class="text-sm mt-2">User ID: {{ user_session.user_id or 'N/A' }}</p>
-            {% else %}
-            <div class="badge badge-ghost gap-2">
-                <i class="fas fa-info-circle"></i>
-                No Previous Session
-            </div>
-            <p class="text-sm mt-2">Login to start a new session</p>
-            {% endif %}
-        </div>
-    </div>
-</div>
-
-<!-- Features Section -->
-<div class="divider divider-primary mt-16 mb-8">Features</div>
-
-<div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-    <div class="card bg-primary text-primary-content">
-        <div class="card-body">
-            <h2 class="card-title">
-                <i class="fas fa-shield-alt"></i>
-                Secure Authentication
-            </h2>
-            <p>OAuth 2.0 based secure login with Upstox API</p>
-        </div>
-    </div>
-
-    <div class="card bg-secondary text-secondary-content">
-        <div class="card-body">
-            <h2 class="card-title">
-                <i class="fas fa-wallet"></i>
-                Fund Management
-            </h2>
-            <p>View real-time equity and commodity fund details</p>
-        </div>
-    </div>
-
-    <div class="card bg-accent text-accent-content">
-        <div class="card-body">
-            <h2 class="card-title">
-                <i class="fas fa-database"></i>
-                Credential Storage
-            </h2>
-            <p>Securely store and manage API credentials</p>
-        </div>
-    </div>
-
-    <div class="card bg-info text-info-content">
-        <div class="card-body">
-            <h2 class="card-title">
-                <i class="fas fa-chart-line"></i>
-                Real-time Data
-            </h2>
-            <p>Access live market data and margin information</p>
-        </div>
-    </div>
-</div>
-{% endblock %}
+</body>
+</html>

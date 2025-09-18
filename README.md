@@ -1,209 +1,257 @@
 # ExpiryTrack
 
-**Zero-Config Automated Historical Data Collection for Expired Derivatives Contracts**
+**Zero-Config Web-Based Historical Data Collection for Expired F&O Contracts**
 
-ExpiryTrack is a specialized Python application that systematically collects, stores, and manages historical trading data for expired Futures and Options contracts from the Upstox platform, building a comprehensive time-series database for quantitative analysis and backtesting.
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
+[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
+[![Flask](https://img.shields.io/badge/flask-2.0+-green.svg)](https://flask.palletsprojects.com/)
 
-## 🎯 Why ExpiryTrack?
+ExpiryTrack is a modern web application that systematically collects, stores, and manages historical trading data for expired Futures and Options contracts from the Upstox platform. Built with a user-friendly interface and zero-configuration philosophy, it makes historical data collection effortless.
 
-Expired contract data is the backbone of serious derivatives trading research, yet it's notoriously difficult to obtain and manage. ExpiryTrack solves this by automating the entire data pipeline with a zero-configuration approach.
+## 🌟 Key Features
 
-### Key Benefits
-- **Zero Configuration**: No .env files needed - encrypted credential storage in database
-- **Multi-Instrument Default**: Supports NSE_INDEX|Nifty 50, NSE_INDEX|Nifty Bank, BSE_INDEX|SENSEX out of the box
-- **Comprehensive Coverage**: Collect up to 6 months of historical expired contracts
-- **High Granularity**: 1-minute interval OHLCV data with open interest
-- **Efficient Storage**: Optimized time-series database using SQLite/DuckDB
-- **Automated Pipeline**: Set it and forget it - fully automated collection
-- **Research Ready**: Data structured for immediate analysis and backtesting
+- **🎯 Web-Based Interface**: Clean, intuitive UI with step-by-step wizard
+- **🔐 Zero Configuration**: Encrypted credential storage - no .env files needed
+- **📊 Multi-Instrument Support**: Pre-configured for Nifty 50, Bank Nifty, and Sensex
+- **📈 3-Month Historical Data**: Automatically downloads last 3 months before expiry
+- **⚡ Real-Time Progress**: Live monitoring with detailed logs and statistics
+- **🔄 Async Processing**: Efficient background task management
+- **🛡️ Secure**: OAuth 2.0 authentication with encrypted storage
 
-## 🚀 Features
+## 🚀 Quick Start
 
-- ✅ **Zero-Config Design**: Encrypted database storage for credentials
-- ✅ **Multi-Instrument Support**: NSE, BSE indices and stocks
-- ✅ **Complete Contract Coverage**: All strikes for Options (CE/PE) and Futures
-- ✅ **Historical Depth**: 6 months of expired contract data
-- ✅ **1-Minute Resolution**: Fine-grained time series data
-- ✅ **Smart Recovery**: Checkpoint-based resume on failures
-- ✅ **Rate Limit Management**: Handles 50/sec, 500/min, 2000/30min limits
-- ✅ **Data Validation**: Built-in integrity checks
-- ✅ **Parallel Processing**: Up to 50 requests/second throughput
-- ✅ **Modern HTTP**: Uses httpx with HTTP/2 support
+### Prerequisites
 
-## 📚 Documentation
+- Python 3.8 or higher
+- Upstox Developer Account ([Get it here](https://api.upstox.com/))
+- 4GB RAM (8GB recommended)
+- 10GB+ free disk space
 
-- **[Product Documentation](./design/PRODUCT_DOCUMENTATION.md)** - Complete product overview, architecture, and roadmap
-- **[Technical Implementation Guide](./design/TECHNICAL_IMPLEMENTATION_GUIDE.md)** - Detailed technical specifications and design patterns
-- **[Developer Quick Start](./design/DEVELOPER_QUICKSTART.md)** - Get up and running in 5 minutes
-- **[API Rate Limits Guide](./design/API_RATE_LIMITS.md)** - Understanding and managing Upstox API rate limits
-- **[Application Summary](./design/APPLICATION_SUMMARY.md)** - Overview of built components and features
+### Installation
 
-## 🏗️ System Architecture
-
-```
-User → Setup Credentials → Authentication → Data Orchestrator → Parallel Collectors → Database
-                                                    ↓
-                                           [Expiry Fetcher]
-                                           [Contract Fetcher]
-                                           [Historical Data Fetcher]
-```
-
-## 💾 Data Pipeline
-
-1. **Discovery**: Dynamically fetch all available expiry dates from API
-2. **Mapping**: Get all contracts for each expiry
-3. **Collection**: Fetch 1-min historical data
-4. **Storage**: Store in optimized time-series format with encryption
-
-## 🔧 Quick Start
+#### 1. Clone the Repository
 
 ```bash
-# Install
+git clone https://github.com/marketcalls/ExpiryTrack.git
+cd ExpiryTrack
+```
+
+#### 2. Create Virtual Environment (Recommended)
+
+```bash
+# Windows
+python -m venv venv
+venv\Scripts\activate
+
+# Linux/Mac
+python3 -m venv venv
+source venv/bin/activate
+```
+
+#### 3. Install Dependencies
+
+```bash
 pip install -r requirements.txt
-
-# Setup credentials (one-time, stored encrypted in database)
-python main.py setup
-
-# Authenticate with Upstox
-python main.py authenticate
-
-# Start collecting for all default instruments
-python main.py collect
-
-# Or collect for specific instrument
-python main.py collect --instrument "NSE_INDEX|Nifty 50"
 ```
 
-## 🔐 Zero-Config Features
+#### 4. Run the Application
 
-ExpiryTrack eliminates the need for .env configuration files:
-
-- **Encrypted Credentials**: API keys stored securely in database using machine-specific encryption
-- **Default Instruments**: Pre-configured for major indices (Nifty 50, Nifty Bank, SENSEX)
-- **Sensible Defaults**: All settings have optimal defaults - just run and collect
-- **Optional Overrides**: Environment variables can still override performance settings if needed
-
-## 📊 Sample Data Query
-
-```python
-import pandas as pd
-import sqlite3
-
-# Connect to database
-conn = sqlite3.connect('./data/expirytrack.db')
-
-# Get option chain data
-query = """
-    SELECT
-        strike_price,
-        contract_type,
-        MAX(close) as max_price,
-        SUM(volume) as total_volume
-    FROM contracts c
-    JOIN historical_data h ON c.expired_instrument_key = h.expired_instrument_key
-    WHERE c.expiry_date = '2025-08-28'
-    GROUP BY strike_price, contract_type
-"""
-
-df = pd.read_sql_query(query, conn)
+```bash
+python app.py
 ```
 
-## 📈 Use Cases
+The application will start on `http://localhost:5000`
 
-- **Backtesting**: Test strategies on actual historical data
-- **Greeks Analysis**: Calculate historical option Greeks
-- **Volatility Studies**: Analyze implied vs realized volatility
-- **Market Microstructure**: Study intraday patterns
-- **Risk Management**: Historical scenario analysis
-- **ML Training**: Build predictive models on quality data
+## 📱 UI Usage Guide
 
-## 🗂️ Database Schema
+### 1️⃣ Initial Setup
 
-### Core Tables
-- `instruments` - Underlying instruments
-- `expiries` - Available expiry dates
-- `contracts` - Contract specifications
-- `historical_data` - 1-minute OHLCV data
-- `job_status` - Collection job tracking
-- `credentials` - Encrypted API credentials (NEW)
-- `default_instruments` - Pre-configured instruments (NEW)
+1. **Open Browser**: Navigate to `http://localhost:5000`
+2. **Go to Settings**: Click on "Settings" in the navigation menu
+3. **Enter API Credentials**:
+   - API Key: Your Upstox API key
+   - API Secret: Your Upstox API secret
+   - Redirect URL: `http://127.0.0.1:5000/callback` (default)
+4. **Save Credentials**: Click "Save Credentials"
+5. **Authenticate**: Click "Login with Upstox" and complete OAuth flow
 
-## ⚙️ Configuration
+### 2️⃣ Data Collection Wizard
 
-Optional settings via environment variables (see `.env.example`):
-```env
-# Performance tuning (optional - defaults work well)
-MAX_WORKERS=10          # Parallel workers
-MAX_REQUESTS_SEC=45     # Safety margin below 50/sec limit
-BATCH_SIZE=5000         # Insert batch size
-HISTORICAL_MONTHS=6     # Months to collect
-LOG_LEVEL=INFO          # Logging level
+Navigate to "Collect Data" to start the 4-step collection wizard:
+
+#### Step 1: Select Instruments
+- Choose from pre-configured instruments:
+  - ✅ Nifty 50
+  - ✅ Bank Nifty
+  - ✅ Sensex
+- Use checkboxes for individual selection
+- "Select All" option available
+
+#### Step 2: Choose Contract Types
+- Select the type of contracts to download:
+  - 📈 **Options**: Call and Put options for all strikes
+  - 📊 **Futures**: Futures contracts
+  - 🎯 **Both**: Options and Futures
+
+#### Step 3: Pick Expiry Dates
+- View all available expiries for selected instruments
+- Individual checkbox selection for specific expiries
+- "Select All" button for each instrument
+- Shows expiry count for each instrument
+
+#### Step 4: Configure & Download
+- **Review Summary**: See selected instruments, types, and expiries
+- **Set Interval**: Choose data granularity (1-minute default)
+- **Configure Workers**: Set concurrent workers (1-10, default: 5)
+- **Start Download**: Click "🚀 Start Download" to begin
+
+### 3️⃣ Monitor Progress
+
+During collection, you'll see:
+- **Real-time Progress Bar**: Visual progress indicator
+- **Live Statistics**:
+  - Expiries processed
+  - Contracts downloaded
+  - Candles collected
+  - Errors (if any)
+- **Scrollable Log Window**: Detailed logs with timestamps
+- **Color-coded Status**: Success (green), Warning (yellow), Error (red)
+
+### 4️⃣ View Status
+
+Navigate to "Status" page to:
+- View database statistics
+- See recent collection tasks
+- Check task history
+- Monitor system health
+
+## 🗂️ Project Structure
+
+```
+ExpiryTrack/
+├── app.py                  # Main Flask application
+├── main.py                 # CLI interface (optional)
+├── requirements.txt        # Python dependencies
+├── .env.example           # Configuration template
+├── src/                   # Source code
+│   ├── api/              # Upstox API client
+│   ├── auth/             # Authentication manager
+│   ├── collectors/       # Data collection logic
+│   ├── database/         # Database operations
+│   └── utils/            # Utilities
+├── templates/            # HTML templates
+│   ├── base.html        # Base template
+│   ├── index.html       # Home page
+│   ├── settings.html    # Settings page
+│   ├── dashboard.html   # Dashboard
+│   ├── collect_wizard.html # Collection wizard
+│   └── status.html      # Status page
+├── data/                 # Database storage
+├── logs/                 # Application logs
+└── design/              # Documentation
 ```
 
-## 🔒 Security
+## 📊 Data Storage
 
-- OAuth 2.0 authentication
-- Machine-specific encrypted credential storage
-- HTTPS API communication
-- No plaintext credentials in files
-- Database-level encryption support
+### Database Location
+- SQLite database: `data/expirytrack.db`
+- Encrypted credentials stored in database
+- No sensitive data in plain text files
 
-## 📋 Requirements
+### Data Structure
+- **Historical Data**: 1-minute OHLCV candles with timestamps
+- **Contract Info**: Strike prices, expiry dates, instrument keys
+- **Collection Metadata**: Task status, progress, logs
 
-- Python 3.9+
-- 4GB RAM (8GB recommended)
-- 50GB+ storage space
-- Stable internet connection
-- Upstox Developer Account
+## 🔧 Configuration (Optional)
+
+While ExpiryTrack works with zero configuration, you can customize settings:
+
+1. Copy `.env.example` to `.env`
+2. Modify settings as needed:
+   ```env
+   # Flask settings
+   FLASK_ENV=development
+   SECRET_KEY=your-secret-key
+
+   # Data collection
+   HISTORICAL_DAYS=90  # 3 months
+   MAX_WORKERS=5
+
+   # Rate limiting
+   MAX_REQUESTS_PER_SECOND=45
+   ```
+
+## 🛠️ Troubleshooting
+
+### Common Issues
+
+#### Application won't start
+```bash
+# Check Python version
+python --version  # Should be 3.8+
+
+# Reinstall dependencies
+pip install -r requirements.txt --upgrade
+```
+
+#### Authentication fails
+- Verify API credentials in Settings
+- Check redirect URL matches Upstox app settings
+- Ensure `http://127.0.0.1:5000/callback` is whitelisted
+
+#### Data not downloading
+- Check logs in the progress window
+- Verify internet connection
+- Ensure market hours for historical data availability
+
+#### Template errors
+- Clear browser cache
+- Restart the application
+- Check `templates/` folder exists
+
+## 📈 Usage Tips
+
+1. **Best Collection Times**: Run during market hours for latest data
+2. **Optimal Workers**: Use 3-5 workers for stable performance
+3. **Data Range**: 3 months historical data is optimal balance
+4. **Regular Updates**: Schedule weekly collections for latest expiries
+5. **Monitor Logs**: Check progress window for any issues
 
 ## 🤝 Contributing
 
-We welcome contributions! Please see our [Contributing Guide](./CONTRIBUTING.md) for details.
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
+3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
+4. Push to the branch (`git push origin feature/AmazingFeature`)
+5. Open a Pull Request
 
 ## 📄 License
 
-This project is licensed under the **GNU Affero General Public License v3.0 (AGPL-3.0)** - see [LICENSE](./LICENSE.md) file for details.
+This project is licensed under the GNU Affero General Public License v3.0 - see [LICENSE](LICENSE.md) file for details.
 
-### What this means:
-- ✅ You can use, modify, and distribute this software
-- ✅ You must disclose source code when distributing
-- ✅ You must license modifications under AGPL-3.0
-- ✅ You must provide source code to users of network services
-- ✅ Copyright and license notices must be preserved
+## 🙏 Acknowledgments
 
-## ⚠️ Disclaimer
+- [Upstox API](https://upstox.com/developer/api-documentation) for providing market data access
+- Flask community for the excellent web framework
+- Contributors and users of ExpiryTrack
 
-This software is for educational and research purposes only. Users are responsible for complying with all applicable laws and regulations regarding financial data usage. Always respect Upstox API terms of service and rate limits.
+## 📧 Support
 
-## 🆘 Support
+- **Documentation**: [Full docs](./design/)
+- **Issues**: [GitHub Issues](https://github.com/marketcalls/ExpiryTrack/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/marketcalls/ExpiryTrack/discussions)
 
-- 📖 [Full Documentation](./design/)
-- 🐛 [Issue Tracker](https://github.com/yourusername/expirytrack/issues)
+## 🔗 Links
 
-## 🌟 Roadmap
-
-- [x] Core data collection pipeline
-- [x] Zero-config credential management
-- [x] Multi-instrument support
-- [x] SQLite storage backend
-- [x] Encrypted credential storage
-- [ ] DuckDB integration
-- [ ] Web dashboard
-- [ ] Cloud storage support
-- [ ] Real-time streaming
-- [ ] Advanced analytics module
-- [ ] Docker containerization
-
-## 🎉 Key Principles
-
-1. **Never Hardcode**: All expiry dates and market data fetched dynamically from API
-2. **Zero Config**: Works out of the box with sensible defaults
-3. **Security First**: Encrypted storage for all sensitive data
-4. **Rate Compliant**: Respects all Upstox API rate limits
-5. **Resume Ready**: Checkpoint-based recovery from failures
+- **GitHub Repository**: [https://github.com/marketcalls/ExpiryTrack](https://github.com/marketcalls/ExpiryTrack)
+- **Upstox Developer**: [https://api.upstox.com/](https://api.upstox.com/)
+- **Documentation**: [Design Docs](./design/)
 
 ---
 
-**Built for the quantitative trading community**
+**Built with ❤️ for the Quantitative Trading Community**
 
-*Transform expired contracts into trading insights with ExpiryTrack*
+*Transform expired contracts into actionable trading insights with ExpiryTrack*
