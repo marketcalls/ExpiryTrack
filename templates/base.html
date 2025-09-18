@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Upstox Integration{% endblock %}</title>
+
+    <!-- TailwindCSS & DaisyUI -->
+    <link href="https://cdn.jsdelivr.net/npm/daisyui@4.4.24/dist/full.min.css" rel="stylesheet" type="text/css" />
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+
+    <!-- Custom Styles -->
+    <style>
+        :root {
+            --upstox-primary: #5E72E4;
+            --upstox-secondary: #2DCE89;
+            --upstox-danger: #F5365C;
+            --upstox-warning: #FB6340;
+            --upstox-info: #11CDEF;
+        }
+
+        .bg-gradient-upstox {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+
+        .text-gradient {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .card-hover {
+            transition: all 0.3s ease;
+        }
+
+        .card-hover:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+        }
+
+        .pulse-animation {
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0% {
+                transform: scale(1);
+            }
+            50% {
+                transform: scale(1.05);
+            }
+            100% {
+                transform: scale(1);
+            }
+        }
+    </style>
+</head>
+<body class="bg-base-200 min-h-screen">
+    <!-- Navbar -->
+    <div class="navbar bg-base-100 shadow-lg">
+        <div class="container mx-auto">
+            <div class="flex-1">
+                <a href="{{ url_for('index') }}" class="btn btn-ghost text-xl">
+                    <i class="fas fa-chart-line text-primary"></i>
+                    <span class="ml-2 font-bold text-gradient">Upstox Connect</span>
+                </a>
+            </div>
+            <div class="flex-none">
+                <ul class="menu menu-horizontal px-1">
+                    <li><a href="{{ url_for('index') }}" class="hover:bg-primary hover:text-white rounded-lg transition-all">
+                        <i class="fas fa-home"></i> Home
+                    </a></li>
+                    <li><a href="{{ url_for('settings') }}" class="hover:bg-primary hover:text-white rounded-lg transition-all">
+                        <i class="fas fa-cog"></i> Settings
+                    </a></li>
+                    {% if session.get('access_token') %}
+                    <li><a href="{{ url_for('dashboard') }}" class="hover:bg-primary hover:text-white rounded-lg transition-all">
+                        <i class="fas fa-tachometer-alt"></i> Dashboard
+                    </a></li>
+                    <li><a href="{{ url_for('logout') }}" class="hover:bg-error hover:text-white rounded-lg transition-all">
+                        <i class="fas fa-sign-out-alt"></i> Logout
+                    </a></li>
+                    {% endif %}
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <!-- Flash Messages -->
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            <div class="container mx-auto mt-4 px-4">
+                {% for category, message in messages %}
+                    <div role="alert" class="alert {% if category == 'success' %}alert-success{% elif category == 'error' %}alert-error{% elif category == 'warning' %}alert-warning{% else %}alert-info{% endif %} mb-4">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="stroke-current shrink-0 h-6 w-6" fill="none" viewBox="0 0 24 24">
+                            {% if category == 'success' %}
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            {% elif category == 'error' %}
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            {% else %}
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            {% endif %}
+                        </svg>
+                        <span>{{ message }}</span>
+                        <div>
+                            <button onclick="this.parentElement.parentElement.remove()" class="btn btn-sm btn-ghost">✕</button>
+                        </div>
+                    </div>
+                {% endfor %}
+            </div>
+        {% endif %}
+    {% endwith %}
+
+    <!-- Main Content -->
+    <main class="container mx-auto px-4 py-8">
+        {% block content %}{% endblock %}
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer footer-center p-10 bg-base-100 text-base-content mt-auto">
+        <div>
+            <div class="grid grid-flow-col gap-4">
+                <a class="link link-hover" href="https://upstox.com/developer/api-documentation">API Docs</a>
+                <a class="link link-hover" href="https://upstox.com">Upstox</a>
+            </div>
+            <div class="mt-4">
+                <p>Copyright © 2024 - Upstox Integration App</p>
+            </div>
+        </div>
+    </footer>
+
+    {% block scripts %}{% endblock %}
+</body>
+</html>

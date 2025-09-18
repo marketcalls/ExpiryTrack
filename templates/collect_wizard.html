@@ -1,0 +1,927 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Data Collection Wizard - ExpiryTrack</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+        }
+
+        .header {
+            text-align: center;
+            color: white;
+            margin-bottom: 30px;
+        }
+
+        .wizard-steps {
+            display: flex;
+            justify-content: center;
+            margin-bottom: 30px;
+            background: rgba(255, 255, 255, 0.1);
+            padding: 15px;
+            border-radius: 10px;
+        }
+
+        .step {
+            display: flex;
+            align-items: center;
+            color: white;
+            opacity: 0.6;
+        }
+
+        .step.active {
+            opacity: 1;
+        }
+
+        .step.completed {
+            opacity: 1;
+        }
+
+        .step-number {
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.3);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            margin-right: 8px;
+        }
+
+        .step.active .step-number {
+            background: white;
+            color: #667eea;
+        }
+
+        .step.completed .step-number {
+            background: #10b981;
+            color: white;
+        }
+
+        .step-connector {
+            width: 50px;
+            height: 2px;
+            background: rgba(255, 255, 255, 0.3);
+            margin: 0 15px;
+        }
+
+        .card {
+            background: white;
+            border-radius: 20px;
+            padding: 30px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.2);
+            margin-bottom: 20px;
+        }
+
+        .card h2 {
+            color: #333;
+            margin-bottom: 20px;
+            font-size: 1.8rem;
+        }
+
+        /* Step 1: Instrument Selection */
+        .instrument-grid {
+            display: grid;
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .instrument-card {
+            display: flex;
+            align-items: center;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: all 0.3s;
+            border: 2px solid transparent;
+        }
+
+        .instrument-card:hover {
+            background: #e9ecef;
+            transform: translateX(5px);
+        }
+
+        .instrument-card.selected {
+            background: #e7f3ff;
+            border-color: #667eea;
+        }
+
+        .instrument-card input[type="checkbox"] {
+            width: 20px;
+            height: 20px;
+            margin-right: 15px;
+        }
+
+        .instrument-info {
+            flex: 1;
+        }
+
+        .instrument-name {
+            font-size: 1.2rem;
+            font-weight: 600;
+            color: #333;
+        }
+
+        .instrument-code {
+            font-size: 0.9rem;
+            color: #6c757d;
+            margin-top: 5px;
+        }
+
+        /* Step 2: Contract Type Selection */
+        .contract-types {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin: 20px 0;
+        }
+
+        .contract-type-card {
+            padding: 20px;
+            border: 2px solid #e9ecef;
+            border-radius: 10px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .contract-type-card:hover {
+            border-color: #667eea;
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.2);
+        }
+
+        .contract-type-card.selected {
+            background: #e7f3ff;
+            border-color: #667eea;
+        }
+
+        .contract-type-card h3 {
+            margin-bottom: 10px;
+            color: #333;
+        }
+
+        .contract-type-card p {
+            color: #6c757d;
+            font-size: 0.9rem;
+        }
+
+        /* Step 3: Expiry Selection */
+        .expiry-section {
+            margin-bottom: 30px;
+        }
+
+        .expiry-section h3 {
+            color: #495057;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+        }
+
+        .instrument-label {
+            background: #667eea;
+            color: white;
+            padding: 4px 12px;
+            border-radius: 5px;
+            font-size: 0.9rem;
+            margin-left: 10px;
+        }
+
+        .expiry-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+            gap: 10px;
+        }
+
+        .expiry-item {
+            display: flex;
+            align-items: center;
+            padding: 10px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .expiry-item:hover {
+            background: #e9ecef;
+        }
+
+        .expiry-item.selected {
+            background: #d4f4dd;
+            border: 1px solid #10b981;
+        }
+
+        .expiry-item input[type="checkbox"] {
+            margin-right: 10px;
+        }
+
+        .expiry-date {
+            font-weight: 500;
+            color: #333;
+        }
+
+        /* Step 4: Collection Options */
+        .option-group {
+            margin-bottom: 20px;
+        }
+
+        .option-group label {
+            display: block;
+            color: #495057;
+            font-weight: 500;
+            margin-bottom: 8px;
+        }
+
+        .option-group input,
+        .option-group select {
+            width: 100%;
+            padding: 10px;
+            border: 2px solid #e9ecef;
+            border-radius: 8px;
+            font-size: 1rem;
+        }
+
+        /* Buttons */
+        .button-group {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 30px;
+        }
+
+        .btn {
+            padding: 12px 30px;
+            border-radius: 10px;
+            font-size: 1rem;
+            font-weight: 600;
+            border: none;
+            cursor: pointer;
+            transition: all 0.3s;
+            text-decoration: none;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(102, 126, 234, 0.3);
+        }
+
+        .btn-secondary {
+            background: #6c757d;
+            color: white;
+        }
+
+        .btn-secondary:hover {
+            background: #5a6268;
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        /* Progress Section */
+        .progress-section {
+            display: none;
+            margin-top: 30px;
+        }
+
+        .progress-section.active {
+            display: block;
+        }
+
+        .log-window {
+            background: #1e1e1e;
+            color: #00ff00;
+            padding: 15px;
+            border-radius: 8px;
+            height: 300px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9rem;
+            margin-top: 20px;
+        }
+
+        .log-entry {
+            margin-bottom: 5px;
+        }
+
+        .log-time {
+            color: #888;
+        }
+
+        .log-error {
+            color: #ff6b6b;
+        }
+
+        .log-success {
+            color: #51cf66;
+        }
+
+        .log-info {
+            color: #4dabf7;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 30px;
+            background: #e9ecef;
+            border-radius: 15px;
+            overflow: hidden;
+            margin: 20px 0;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea, #764ba2);
+            width: 0%;
+            transition: width 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: 600;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-top: 20px;
+        }
+
+        .stat-card {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: #667eea;
+        }
+
+        .stat-label {
+            color: #6c757d;
+            font-size: 0.9rem;
+            margin-top: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📊 Data Collection Wizard</h1>
+            <p>Step-by-step guide to collect expired contract data</p>
+        </div>
+
+        <!-- Wizard Steps Indicator -->
+        <div class="wizard-steps">
+            <div class="step active" id="step1-indicator">
+                <div class="step-number">1</div>
+                <span>Select Instruments</span>
+            </div>
+            <div class="step-connector"></div>
+            <div class="step" id="step2-indicator">
+                <div class="step-number">2</div>
+                <span>Contract Types</span>
+            </div>
+            <div class="step-connector"></div>
+            <div class="step" id="step3-indicator">
+                <div class="step-number">3</div>
+                <span>Choose Expiries</span>
+            </div>
+            <div class="step-connector"></div>
+            <div class="step" id="step4-indicator">
+                <div class="step-number">4</div>
+                <span>Download</span>
+            </div>
+        </div>
+
+        <!-- Step 1: Instrument Selection -->
+        <div class="card" id="step1">
+            <h2>Step 1: Select Instruments</h2>
+            <p style="color: #6c757d; margin-bottom: 20px;">Choose which indices you want to collect data for</p>
+
+            <div class="instrument-grid">
+                <div class="instrument-card" onclick="toggleInstrument(event, 'Nifty 50')">
+                    <input type="checkbox" id="inst-nifty50" value="Nifty 50" onclick="handleCheckboxClick(event)">
+                    <div class="instrument-info">
+                        <div class="instrument-name">Nifty 50</div>
+                        <div class="instrument-code">NSE_INDEX|Nifty 50</div>
+                    </div>
+                </div>
+
+                <div class="instrument-card" onclick="toggleInstrument(event, 'Bank Nifty')">
+                    <input type="checkbox" id="inst-banknifty" value="Bank Nifty" onclick="handleCheckboxClick(event)">
+                    <div class="instrument-info">
+                        <div class="instrument-name">Bank Nifty</div>
+                        <div class="instrument-code">NSE_INDEX|Nifty Bank</div>
+                    </div>
+                </div>
+
+                <div class="instrument-card" onclick="toggleInstrument(event, 'Sensex')">
+                    <input type="checkbox" id="inst-sensex" value="Sensex" onclick="handleCheckboxClick(event)">
+                    <div class="instrument-info">
+                        <div class="instrument-name">Sensex</div>
+                        <div class="instrument-code">BSE_INDEX|SENSEX</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="button-group">
+                <button class="btn btn-secondary" onclick="selectAllInstruments()">Select All</button>
+                <button class="btn btn-primary" onclick="goToStep2()" id="step1-next" disabled>Next →</button>
+            </div>
+        </div>
+
+        <!-- Step 2: Contract Type Selection -->
+        <div class="card" id="step2" style="display: none;">
+            <h2>Step 2: Select Contract Types</h2>
+            <p style="color: #6c757d; margin-bottom: 20px;">Choose what type of contracts to download</p>
+
+            <div class="contract-types">
+                <div class="contract-type-card" onclick="toggleContractType('options')" id="type-options">
+                    <h3>📈 Options</h3>
+                    <p>Call and Put options for all strikes</p>
+                </div>
+
+                <div class="contract-type-card" onclick="toggleContractType('futures')" id="type-futures">
+                    <h3>📊 Futures</h3>
+                    <p>Futures contracts for selected expiries</p>
+                </div>
+
+                <div class="contract-type-card" onclick="toggleContractType('both')" id="type-both">
+                    <h3>🎯 Both</h3>
+                    <p>Options and Futures contracts</p>
+                </div>
+            </div>
+
+            <div class="button-group">
+                <button class="btn btn-secondary" onclick="goToStep1()">← Back</button>
+                <button class="btn btn-primary" onclick="goToStep3()" id="step2-next" disabled>Next →</button>
+            </div>
+        </div>
+
+        <!-- Step 3: Expiry Selection -->
+        <div class="card" id="step3" style="display: none;">
+            <h2>Step 3: Select Expiries</h2>
+            <p style="color: #6c757d; margin-bottom: 20px;">Choose which expiry dates to download data for</p>
+
+            <div id="expiry-container">
+                <!-- Expiries will be loaded dynamically -->
+                <div style="text-align: center; padding: 40px;">
+                    <p>Loading expiries...</p>
+                </div>
+            </div>
+
+            <div class="button-group">
+                <button class="btn btn-secondary" onclick="goToStep2()">← Back</button>
+                <button class="btn btn-primary" onclick="goToStep4()" id="step3-next" disabled>Next →</button>
+            </div>
+        </div>
+
+        <!-- Step 4: Collection Options & Download -->
+        <div class="card" id="step4" style="display: none;">
+            <h2>Step 4: Configure & Download</h2>
+
+            <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+                <h3 style="margin-bottom: 10px;">Summary</h3>
+                <div id="collection-summary"></div>
+            </div>
+
+            <div class="option-group">
+                <label for="interval">Data Interval</label>
+                <select id="interval">
+                    <option value="1minute" selected>1 Minute</option>
+                    <option value="3minute">3 Minutes</option>
+                    <option value="5minute">5 Minutes</option>
+                    <option value="15minute">15 Minutes</option>
+                    <option value="30minute">30 Minutes</option>
+                </select>
+            </div>
+
+            <div class="option-group">
+                <label for="workers">Concurrent Workers (1-10)</label>
+                <input type="number" id="workers" min="1" max="10" value="5">
+            </div>
+
+            <div class="button-group">
+                <button class="btn btn-secondary" onclick="goToStep3()">← Back</button>
+                <button class="btn btn-primary" onclick="startCollection()" id="start-btn">🚀 Start Download</button>
+            </div>
+
+            <div class="progress-section" id="progress-section">
+                <h3>Download Progress</h3>
+
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progress-fill">0%</div>
+                </div>
+
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-value" id="stat-expiries">0</div>
+                        <div class="stat-label">Expiries</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="stat-contracts">0</div>
+                        <div class="stat-label">Contracts</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="stat-candles">0</div>
+                        <div class="stat-label">Candles</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="stat-errors">0</div>
+                        <div class="stat-label">Errors</div>
+                    </div>
+                </div>
+
+                <div class="log-window" id="log-window">
+                    <div class="log-entry">
+                        <span class="log-time">[00:00:00]</span>
+                        <span class="log-info">Ready to start collection...</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Global state
+        let selectedInstruments = [];
+        let selectedContractType = '';
+        let selectedExpiries = {};
+        let collectionInterval = null;
+
+        // Step 1: Instrument Selection
+        function handleCheckboxClick(event) {
+            event.stopPropagation();
+            updateInstrumentSelection();
+        }
+
+        function toggleInstrument(event, name) {
+            // Only toggle if not clicking on checkbox itself
+            if (event.target.type === 'checkbox') {
+                return;
+            }
+            const checkbox = document.querySelector(`input[value="${name}"]`);
+            checkbox.checked = !checkbox.checked;
+            updateInstrumentSelection();
+        }
+
+        function updateInstrumentSelection() {
+            selectedInstruments = [];
+            document.querySelectorAll('.instrument-card input:checked').forEach(cb => {
+                selectedInstruments.push(cb.value);
+                cb.parentElement.classList.add('selected');
+            });
+
+            document.querySelectorAll('.instrument-card input:not(:checked)').forEach(cb => {
+                cb.parentElement.classList.remove('selected');
+            });
+
+            document.getElementById('step1-next').disabled = selectedInstruments.length === 0;
+        }
+
+        function selectAllInstruments() {
+            const allChecked = document.querySelectorAll('.instrument-card input:checked').length === 3;
+            document.querySelectorAll('.instrument-card input').forEach(cb => {
+                cb.checked = !allChecked;
+            });
+            updateInstrumentSelection();
+        }
+
+        // Step 2: Contract Type Selection
+        function toggleContractType(type) {
+            selectedContractType = type;
+            document.querySelectorAll('.contract-type-card').forEach(card => {
+                card.classList.remove('selected');
+            });
+            document.getElementById(`type-${type}`).classList.add('selected');
+            document.getElementById('step2-next').disabled = false;
+        }
+
+        // Step 3: Expiry Selection
+        async function loadExpiries() {
+            const container = document.getElementById('expiry-container');
+            container.innerHTML = '<div style="text-align: center; padding: 40px;">Loading expiries...</div>';
+
+            selectedExpiries = {};
+
+            for (const instrument of selectedInstruments) {
+                try {
+                    const response = await fetch(`/api/expiries/${instrument}`);
+                    const data = await response.json();
+
+                    if (data.expiries) {
+                        selectedExpiries[instrument] = data.expiries;
+                    }
+                } catch (error) {
+                    console.error(`Failed to load expiries for ${instrument}:`, error);
+                }
+            }
+
+            displayExpiries();
+        }
+
+        function displayExpiries() {
+            const container = document.getElementById('expiry-container');
+            container.innerHTML = '';
+
+            for (const [instrument, expiries] of Object.entries(selectedExpiries)) {
+                const section = document.createElement('div');
+                section.className = 'expiry-section';
+
+                section.innerHTML = `
+                    <h3>
+                        ${instrument}
+                        <span class="instrument-label">${expiries.length} expiries</span>
+                    </h3>
+                    <button class="btn btn-secondary" style="margin-bottom: 10px;" onclick="toggleAllExpiries('${instrument}')">
+                        Select All
+                    </button>
+                    <div class="expiry-grid" id="expiries-${instrument.replace(/\s/g, '-')}">
+                        ${expiries.map(expiry => `
+                            <div class="expiry-item" onclick="toggleExpiry(event, '${instrument}', '${expiry}')">
+                                <input type="checkbox" value="${expiry}" data-instrument="${instrument}" onclick="handleExpiryCheckboxClick(event)">
+                                <span class="expiry-date">${formatDate(expiry)}</span>
+                            </div>
+                        `).join('')}
+                    </div>
+                `;
+
+                container.appendChild(section);
+            }
+
+            updateExpirySelection();
+        }
+
+        function formatDate(dateStr) {
+            const date = new Date(dateStr);
+            return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+        }
+
+        function handleExpiryCheckboxClick(event) {
+            event.stopPropagation();
+            updateExpirySelection();
+        }
+
+        function toggleExpiry(event, instrument, expiry) {
+            // Only toggle if not clicking on checkbox itself
+            if (event.target.type === 'checkbox') {
+                return;
+            }
+            const checkbox = document.querySelector(`input[value="${expiry}"][data-instrument="${instrument}"]`);
+            checkbox.checked = !checkbox.checked;
+            updateExpirySelection();
+        }
+
+        function toggleAllExpiries(instrument) {
+            const checkboxes = document.querySelectorAll(`input[data-instrument="${instrument}"]`);
+            const allChecked = Array.from(checkboxes).every(cb => cb.checked);
+            checkboxes.forEach(cb => cb.checked = !allChecked);
+            updateExpirySelection();
+        }
+
+        function updateExpirySelection() {
+            document.querySelectorAll('.expiry-item input:checked').forEach(cb => {
+                cb.parentElement.classList.add('selected');
+            });
+
+            document.querySelectorAll('.expiry-item input:not(:checked)').forEach(cb => {
+                cb.parentElement.classList.remove('selected');
+            });
+
+            const hasSelection = document.querySelectorAll('.expiry-item input:checked').length > 0;
+            document.getElementById('step3-next').disabled = !hasSelection;
+        }
+
+        // Navigation
+        function goToStep1() {
+            showStep(1);
+        }
+
+        function goToStep2() {
+            if (selectedInstruments.length === 0) {
+                alert('Please select at least one instrument');
+                return;
+            }
+            showStep(2);
+        }
+
+        function goToStep3() {
+            if (!selectedContractType) {
+                alert('Please select contract type');
+                return;
+            }
+            showStep(3);
+            loadExpiries();
+        }
+
+        function goToStep4() {
+            const selectedExpiryCount = document.querySelectorAll('.expiry-item input:checked').length;
+            if (selectedExpiryCount === 0) {
+                alert('Please select at least one expiry');
+                return;
+            }
+
+            // Generate summary
+            const summary = document.getElementById('collection-summary');
+            const selectedExpiryData = {};
+
+            document.querySelectorAll('.expiry-item input:checked').forEach(cb => {
+                const inst = cb.getAttribute('data-instrument');
+                if (!selectedExpiryData[inst]) {
+                    selectedExpiryData[inst] = [];
+                }
+                selectedExpiryData[inst].push(cb.value);
+            });
+
+            let summaryHtml = '<ul>';
+            summaryHtml += `<li><strong>Instruments:</strong> ${selectedInstruments.join(', ')}</li>`;
+            summaryHtml += `<li><strong>Contract Type:</strong> ${selectedContractType.charAt(0).toUpperCase() + selectedContractType.slice(1)}</li>`;
+            summaryHtml += `<li><strong>Total Expiries:</strong> ${selectedExpiryCount}</li>`;
+
+            for (const [inst, expiries] of Object.entries(selectedExpiryData)) {
+                summaryHtml += `<li><strong>${inst}:</strong> ${expiries.length} expiries selected</li>`;
+            }
+            summaryHtml += '</ul>';
+
+            summary.innerHTML = summaryHtml;
+            showStep(4);
+        }
+
+        function showStep(stepNum) {
+            // Hide all steps
+            document.querySelectorAll('.card').forEach(card => {
+                card.style.display = 'none';
+            });
+
+            // Show current step
+            document.getElementById(`step${stepNum}`).style.display = 'block';
+
+            // Update indicators
+            document.querySelectorAll('.step').forEach((step, index) => {
+                step.classList.remove('active', 'completed');
+                if (index + 1 < stepNum) {
+                    step.classList.add('completed');
+                } else if (index + 1 === stepNum) {
+                    step.classList.add('active');
+                }
+            });
+        }
+
+        // Collection
+        async function startCollection() {
+            const btn = document.getElementById('start-btn');
+            btn.disabled = true;
+            btn.textContent = 'Downloading...';
+
+            document.getElementById('progress-section').classList.add('active');
+
+            // Gather all selected data
+            const collectionData = {
+                instruments: selectedInstruments,
+                contract_type: selectedContractType,
+                expiries: {},
+                interval: document.getElementById('interval').value,
+                workers: parseInt(document.getElementById('workers').value)
+            };
+
+            // Collect selected expiries
+            document.querySelectorAll('.expiry-item input:checked').forEach(cb => {
+                const inst = cb.getAttribute('data-instrument');
+                if (!collectionData.expiries[inst]) {
+                    collectionData.expiries[inst] = [];
+                }
+                collectionData.expiries[inst].push(cb.value);
+            });
+
+            addLog('Starting data collection...', 'info');
+            addLog(`Instruments: ${selectedInstruments.join(', ')}`, 'info');
+            addLog(`Contract Type: ${selectedContractType}`, 'info');
+
+            try {
+                const response = await fetch('/api/collect/start', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(collectionData)
+                });
+
+                const result = await response.json();
+
+                if (result.task_id) {
+                    addLog(`Collection started with task ID: ${result.task_id}`, 'success');
+                    startPolling(result.task_id);
+                } else {
+                    addLog('Failed to start collection', 'error');
+                    btn.disabled = false;
+                    btn.textContent = '🚀 Start Download';
+                }
+            } catch (error) {
+                addLog(`Error: ${error.message}`, 'error');
+                btn.disabled = false;
+                btn.textContent = '🚀 Start Download';
+            }
+        }
+
+        function startPolling(taskId) {
+            collectionInterval = setInterval(async () => {
+                try {
+                    const response = await fetch(`/api/collect/status/${taskId}`);
+                    const status = await response.json();
+
+                    updateProgress(status);
+
+                    if (status.status === 'completed' || status.status === 'failed') {
+                        clearInterval(collectionInterval);
+                        document.getElementById('start-btn').disabled = false;
+                        document.getElementById('start-btn').textContent = '🚀 Start New Collection';
+
+                        if (status.status === 'completed') {
+                            addLog('Collection completed successfully!', 'success');
+                        } else {
+                            addLog('Collection failed!', 'error');
+                        }
+                    }
+                } catch (error) {
+                    console.error('Polling error:', error);
+                }
+            }, 2000); // Poll every 2 seconds
+        }
+
+        function updateProgress(status) {
+            if (status.progress !== undefined) {
+                const progressBar = document.getElementById('progress-fill');
+                progressBar.style.width = status.progress + '%';
+                progressBar.textContent = status.progress + '%';
+            }
+
+            if (status.stats) {
+                document.getElementById('stat-expiries').textContent = status.stats.expiries || 0;
+                document.getElementById('stat-contracts').textContent = status.stats.contracts || 0;
+                document.getElementById('stat-candles').textContent = formatNumber(status.stats.candles || 0);
+                document.getElementById('stat-errors').textContent = status.stats.errors || 0;
+            }
+
+            if (status.current_action) {
+                addLog(status.current_action, 'info');
+            }
+        }
+
+        function formatNumber(num) {
+            return num.toLocaleString();
+        }
+
+        function addLog(message, type = 'info') {
+            const logWindow = document.getElementById('log-window');
+            const timestamp = new Date().toLocaleTimeString();
+
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+            entry.innerHTML = `
+                <span class="log-time">[${timestamp}]</span>
+                <span class="log-${type}">${message}</span>
+            `;
+
+            logWindow.appendChild(entry);
+            logWindow.scrollTop = logWindow.scrollHeight;
+        }
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            // Add event listeners to checkboxes
+            document.querySelectorAll('.instrument-card input').forEach(cb => {
+                cb.addEventListener('change', updateInstrumentSelection);
+            });
+        });
+    </script>
+</body>
+</html>

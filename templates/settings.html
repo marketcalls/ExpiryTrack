@@ -1,0 +1,135 @@
+{% extends "base.html" %}
+
+{% block title %}Settings - Upstox Integration{% endblock %}
+
+{% block content %}
+<div class="max-w-4xl mx-auto">
+    <div class="card bg-base-100 shadow-2xl">
+        <div class="card-body">
+            <h2 class="card-title text-3xl mb-6">
+                <i class="fas fa-cog text-primary"></i>
+                API Configuration
+            </h2>
+
+            <form method="POST" action="{{ url_for('settings') }}">
+                <div class="grid grid-cols-1 gap-6">
+                    <!-- API Key Field -->
+                    <div class="form-control">
+                        <label class="label">
+                            <span class="label-text font-semibold">
+                                <i class="fas fa-key text-primary mr-2"></i>API Key (Client ID)
+                            </span>
+                            <span class="label-text-alt">
+                                <a href="https://upstox.com/developer/apps" target="_blank" class="link link-primary">
+                                    Get from Upstox Developer Console
+                                    <i class="fas fa-external-link-alt ml-1"></i>
+                                </a>
+                            </span>
+                        </label>
+                        <input type="text"
+                               name="api_key"
+                               placeholder="Enter your API Key"
+                               class="input input-bordered input-primary"
+                               value="{{ credentials.api_key if credentials else '' }}"
+                               required />
+                    </div>
+
+                    <!-- API Secret Field -->
+                    <div class="form-control">
+                        <label class="label">
+                            <span class="label-text font-semibold">
+                                <i class="fas fa-lock text-secondary mr-2"></i>API Secret
+                            </span>
+                            <span class="label-text-alt text-warning">Keep this confidential</span>
+                        </label>
+                        <input type="password"
+                               name="api_secret"
+                               placeholder="Enter your API Secret"
+                               class="input input-bordered input-secondary"
+                               value="{{ credentials.api_secret if credentials else '' }}"
+                               required />
+                        <label class="label">
+                            <span class="label-text-alt">Your secret key from Upstox app settings</span>
+                        </label>
+                    </div>
+
+                    <!-- Redirect URL Field -->
+                    <div class="form-control">
+                        <label class="label">
+                            <span class="label-text font-semibold">
+                                <i class="fas fa-link text-info mr-2"></i>Redirect URL
+                            </span>
+                            <span class="label-text-alt">OAuth callback URL</span>
+                        </label>
+                        <input type="url"
+                               name="redirect_url"
+                               placeholder="http://127.0.0.1:5000/upstox/callback"
+                               class="input input-bordered input-info"
+                               value="{{ credentials.redirect_url if credentials else 'http://127.0.0.1:5000/upstox/callback' }}"
+                               required />
+                        <label class="label">
+                            <span class="label-text-alt">
+                                <i class="fas fa-info-circle text-info"></i>
+                                Add this URL to your Upstox app's redirect URIs
+                            </span>
+                        </label>
+                    </div>
+
+                    <!-- Info Alert -->
+                    <div role="alert" class="alert alert-info">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="stroke-current shrink-0 w-6 h-6">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                        </svg>
+                        <div>
+                            <h3 class="font-bold">Setup Instructions:</h3>
+                            <div class="text-xs mt-2">
+                                <ol class="list-decimal list-inside space-y-1">
+                                    <li>Go to <a href="https://upstox.com/developer/apps" target="_blank" class="link">Upstox Developer Console</a></li>
+                                    <li>Create a new app or select existing one</li>
+                                    <li>Copy the API Key and API Secret</li>
+                                    <li>Add the redirect URL to your app settings</li>
+                                    <li>Save the credentials here</li>
+                                </ol>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Submit Buttons -->
+                    <div class="card-actions justify-between mt-6">
+                        <a href="{{ url_for('index') }}" class="btn btn-ghost">
+                            <i class="fas fa-arrow-left mr-2"></i>Cancel
+                        </a>
+                        <button type="submit" class="btn btn-primary">
+                            <i class="fas fa-save mr-2"></i>Save Credentials
+                        </button>
+                    </div>
+                </div>
+            </form>
+
+            {% if credentials %}
+            <div class="divider">Current Configuration</div>
+
+            <div class="stats shadow w-full">
+                <div class="stat">
+                    <div class="stat-figure text-primary">
+                        <i class="fas fa-check-circle text-3xl"></i>
+                    </div>
+                    <div class="stat-title">Status</div>
+                    <div class="stat-value text-success text-2xl">Configured</div>
+                    <div class="stat-desc">Last updated: {{ credentials.updated_at.strftime('%Y-%m-%d %H:%M') }}</div>
+                </div>
+
+                <div class="stat">
+                    <div class="stat-figure text-secondary">
+                        <i class="fas fa-key text-3xl"></i>
+                    </div>
+                    <div class="stat-title">API Key</div>
+                    <div class="stat-value text-lg">{{ credentials.api_key[:10] }}...</div>
+                    <div class="stat-desc">Client ID for authentication</div>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}

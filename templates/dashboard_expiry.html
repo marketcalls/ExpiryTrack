@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard - ExpiryTrack</title>
+    <link href="https://cdn.jsdelivr.net/npm/daisyui@4.4.24/dist/full.min.css" rel="stylesheet" type="text/css" />
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body data-theme="light">
+    <!-- Navbar -->
+    <div class="navbar bg-base-200">
+        <div class="flex-1">
+            <a class="btn btn-ghost text-xl">📈 ExpiryTrack Dashboard</a>
+        </div>
+        <div class="flex-none">
+            <ul class="menu menu-horizontal px-1">
+                <li><a href="/">Home</a></li>
+                <li><a href="/settings">Settings</a></li>
+                <li><a href="/dashboard" class="active">Dashboard</a></li>
+                <li><a href="/logout" class="text-error">Logout</a></li>
+            </ul>
+        </div>
+    </div>
+
+    <div class="container mx-auto p-6">
+        <!-- Statistics -->
+        <div class="stats shadow w-full mb-6">
+            <div class="stat">
+                <div class="stat-figure text-primary">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="inline-block w-8 h-8 stroke-current"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"></path></svg>
+                </div>
+                <div class="stat-title">Instruments</div>
+                <div class="stat-value text-primary">{{ stats.total_instruments }}</div>
+                <div class="stat-desc">Tracked instruments</div>
+            </div>
+
+            <div class="stat">
+                <div class="stat-figure text-secondary">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="inline-block w-8 h-8 stroke-current"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                </div>
+                <div class="stat-title">Contracts</div>
+                <div class="stat-value text-secondary">{{ "{:,}".format(stats.total_contracts) }}</div>
+                <div class="stat-desc">Options & Futures</div>
+            </div>
+
+            <div class="stat">
+                <div class="stat-figure text-accent">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="inline-block w-8 h-8 stroke-current"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"></path></svg>
+                </div>
+                <div class="stat-title">Historical Data</div>
+                <div class="stat-value text-accent">{{ "{:,}".format(stats.total_candles) }}</div>
+                <div class="stat-desc">1-minute candles</div>
+            </div>
+        </div>
+
+        <!-- Pending Work -->
+        {% if stats.pending_expiries > 0 or stats.pending_contracts > 0 %}
+        <div class="alert alert-warning mb-6">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="stroke-current shrink-0 w-6 h-6"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+            <div>
+                <h3 class="font-bold">Pending Work</h3>
+                <div class="text-sm">
+                    Expiries to process: {{ stats.pending_expiries }} |
+                    Contracts to fetch: {{ stats.pending_contracts }}
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <!-- Collection Controls -->
+            <div class="card bg-base-100 shadow-xl">
+                <div class="card-body">
+                    <h2 class="card-title">Data Collection</h2>
+
+                    <div class="form-control">
+                        <label class="label">
+                            <span class="label-text">Instrument</span>
+                        </label>
+                        <input type="text" id="instrument" placeholder="NSE_INDEX|Nifty 50"
+                               class="input input-bordered" value="NSE_INDEX|Nifty 50" />
+                    </div>
+
+                    <div class="form-control">
+                        <label class="label">
+                            <span class="label-text">Months Back</span>
+                        </label>
+                        <select id="months" class="select select-bordered">
+                            <option value="1">1 Month</option>
+                            <option value="3">3 Months</option>
+                            <option value="6" selected>6 Months</option>
+                        </select>
+                    </div>
+
+                    <div class="card-actions justify-end mt-4">
+                        <button onclick="fetchExpiries()" class="btn btn-secondary">Get Expiries</button>
+                        <button onclick="startCollection()" class="btn btn-primary">Start Collection</button>
+                    </div>
+
+                    <div id="collection-status" class="mt-4"></div>
+                </div>
+            </div>
+
+            <!-- Recent Jobs -->
+            <div class="card bg-base-100 shadow-xl">
+                <div class="card-body">
+                    <h2 class="card-title">Recent Jobs</h2>
+
+                    <div class="overflow-x-auto">
+                        <table class="table table-sm">
+                            <thead>
+                                <tr>
+                                    <th>Type</th>
+                                    <th>Status</th>
+                                    <th>Started</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for job in recent_jobs[:5] %}
+                                <tr>
+                                    <td>{{ job.job_type }}</td>
+                                    <td>
+                                        <span class="badge
+                                            {% if job.status == 'completed' %}badge-success{% endif %}
+                                            {% if job.status == 'failed' %}badge-error{% endif %}
+                                            {% if job.status == 'pending' %}badge-warning{% endif %}">
+                                            {{ job.status }}
+                                        </span>
+                                    </td>
+                                    <td>{{ job.started_at or '-' }}</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Expiry List -->
+        <div class="card bg-base-100 shadow-xl mt-6">
+            <div class="card-body">
+                <h2 class="card-title">Available Expiries</h2>
+                <div id="expiry-list" class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2">
+                    <p class="text-gray-500">Click "Get Expiries" to load available dates</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        async function fetchExpiries() {
+            const instrument = document.getElementById('instrument').value;
+            const statusDiv = document.getElementById('collection-status');
+            const expiryList = document.getElementById('expiry-list');
+
+            statusDiv.innerHTML = '<span class="loading loading-spinner loading-md"></span> Fetching expiries...';
+
+            try {
+                const response = await fetch(`/api/expiries/${encodeURIComponent(instrument)}`);
+                const data = await response.json();
+
+                if (data.expiries && data.expiries.length > 0) {
+                    statusDiv.innerHTML = `<div class="alert alert-success">Found ${data.expiries.length} expiries</div>`;
+
+                    // Display expiries
+                    expiryList.innerHTML = data.expiries.map(expiry =>
+                        `<div class="badge badge-outline">${expiry}</div>`
+                    ).join('');
+                } else {
+                    statusDiv.innerHTML = '<div class="alert alert-error">No expiries found</div>';
+                }
+            } catch (error) {
+                statusDiv.innerHTML = `<div class="alert alert-error">Error: ${error.message}</div>`;
+            }
+        }
+
+        async function startCollection() {
+            const instrument = document.getElementById('instrument').value;
+            const months = document.getElementById('months').value;
+            const statusDiv = document.getElementById('collection-status');
+
+            statusDiv.innerHTML = '<span class="loading loading-spinner loading-md"></span> Starting collection...';
+
+            try {
+                const response = await fetch('/api/collect', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({instrument, months: parseInt(months)})
+                });
+
+                const data = await response.json();
+
+                if (data.error) {
+                    statusDiv.innerHTML = `<div class="alert alert-error">Error: ${data.error}</div>`;
+                } else {
+                    statusDiv.innerHTML = `
+                        <div class="alert alert-success">
+                            <div>
+                                <h4 class="font-bold">Collection Complete!</h4>
+                                <p>Expiries: ${data.expiries_fetched}</p>
+                                <p>Contracts: ${data.contracts_fetched}</p>
+                                <p>Candles: ${data.candles_fetched.toLocaleString()}</p>
+                            </div>
+                        </div>
+                    `;
+
+                    // Reload page after 3 seconds to show updated stats
+                    setTimeout(() => location.reload(), 3000);
+                }
+            } catch (error) {
+                statusDiv.innerHTML = `<div class="alert alert-error">Error: ${error.message}</div>`;
+            }
+        }
+    </script>
+</body>
+</html>

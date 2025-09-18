@@ -1,0 +1,294 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - Upstox Integration{% endblock %}
+
+{% block content %}
+<div class="mb-8">
+    <h1 class="text-4xl font-bold text-gradient">Welcome, {{ user_name }}!</h1>
+    <p class="text-base-content/60 mt-2">Monitor your funds and margin details</p>
+</div>
+
+<!-- Fund Details Section -->
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+    <!-- Equity Funds Card -->
+    <div class="card bg-base-100 shadow-xl">
+        <div class="card-body">
+            <h2 class="card-title text-2xl mb-4">
+                <i class="fas fa-chart-line text-primary mr-2"></i>
+                Equity Funds
+            </h2>
+
+            <div id="equity-loading" class="flex justify-center py-8">
+                <span class="loading loading-spinner loading-lg text-primary"></span>
+            </div>
+
+            <div id="equity-funds" class="hidden space-y-4">
+                <div class="stats stats-vertical shadow w-full">
+                    <div class="stat">
+                        <div class="stat-figure text-success">
+                            <i class="fas fa-wallet text-3xl"></i>
+                        </div>
+                        <div class="stat-title">Available Margin</div>
+                        <div class="stat-value text-success" id="equity-available">₹0.00</div>
+                        <div class="stat-desc">Ready for trading</div>
+                    </div>
+
+                    <div class="stat">
+                        <div class="stat-figure text-warning">
+                            <i class="fas fa-lock text-3xl"></i>
+                        </div>
+                        <div class="stat-title">Used Margin</div>
+                        <div class="stat-value text-warning" id="equity-used">₹0.00</div>
+                        <div class="stat-desc">Blocked in positions</div>
+                    </div>
+
+                    <div class="stat">
+                        <div class="stat-figure text-info">
+                            <i class="fas fa-money-bill-wave text-3xl"></i>
+                        </div>
+                        <div class="stat-title">Payin Amount</div>
+                        <div class="stat-value text-info" id="equity-payin">₹0.00</div>
+                        <div class="stat-desc">Today's deposit</div>
+                    </div>
+                </div>
+
+                <div class="collapse collapse-arrow bg-base-200">
+                    <input type="checkbox" />
+                    <div class="collapse-title text-lg font-medium">
+                        <i class="fas fa-info-circle text-primary mr-2"></i>
+                        Additional Details
+                    </div>
+                    <div class="collapse-content">
+                        <div class="grid grid-cols-2 gap-4 pt-4">
+                            <div>
+                                <p class="text-sm text-base-content/60">SPAN Margin</p>
+                                <p class="font-semibold" id="equity-span">₹0.00</p>
+                            </div>
+                            <div>
+                                <p class="text-sm text-base-content/60">Exposure Margin</p>
+                                <p class="font-semibold" id="equity-exposure">₹0.00</p>
+                            </div>
+                            <div>
+                                <p class="text-sm text-base-content/60">Adhoc Margin</p>
+                                <p class="font-semibold" id="equity-adhoc">₹0.00</p>
+                            </div>
+                            <div>
+                                <p class="text-sm text-base-content/60">Notional Cash</p>
+                                <p class="font-semibold" id="equity-notional">₹0.00</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="equity-error" class="hidden alert alert-error">
+                <svg xmlns="http://www.w3.org/2000/svg" class="stroke-current shrink-0 h-6 w-6" fill="none" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <span>Failed to load equity funds data</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Commodity Funds Card -->
+    <div class="card bg-base-100 shadow-xl">
+        <div class="card-body">
+            <h2 class="card-title text-2xl mb-4">
+                <i class="fas fa-coins text-warning mr-2"></i>
+                Commodity Funds
+            </h2>
+
+            <div id="commodity-loading" class="flex justify-center py-8">
+                <span class="loading loading-spinner loading-lg text-warning"></span>
+            </div>
+
+            <div id="commodity-funds" class="hidden space-y-4">
+                <div class="stats stats-vertical shadow w-full">
+                    <div class="stat">
+                        <div class="stat-figure text-success">
+                            <i class="fas fa-wallet text-3xl"></i>
+                        </div>
+                        <div class="stat-title">Available Margin</div>
+                        <div class="stat-value text-success" id="commodity-available">₹0.00</div>
+                        <div class="stat-desc">Ready for trading</div>
+                    </div>
+
+                    <div class="stat">
+                        <div class="stat-figure text-warning">
+                            <i class="fas fa-lock text-3xl"></i>
+                        </div>
+                        <div class="stat-title">Used Margin</div>
+                        <div class="stat-value text-warning" id="commodity-used">₹0.00</div>
+                        <div class="stat-desc">Blocked in positions</div>
+                    </div>
+
+                    <div class="stat">
+                        <div class="stat-figure text-info">
+                            <i class="fas fa-money-bill-wave text-3xl"></i>
+                        </div>
+                        <div class="stat-title">Payin Amount</div>
+                        <div class="stat-value text-info" id="commodity-payin">₹0.00</div>
+                        <div class="stat-desc">Today's deposit</div>
+                    </div>
+                </div>
+
+                <div class="collapse collapse-arrow bg-base-200">
+                    <input type="checkbox" />
+                    <div class="collapse-title text-lg font-medium">
+                        <i class="fas fa-info-circle text-warning mr-2"></i>
+                        Additional Details
+                    </div>
+                    <div class="collapse-content">
+                        <div class="grid grid-cols-2 gap-4 pt-4">
+                            <div>
+                                <p class="text-sm text-base-content/60">SPAN Margin</p>
+                                <p class="font-semibold" id="commodity-span">₹0.00</p>
+                            </div>
+                            <div>
+                                <p class="text-sm text-base-content/60">Exposure Margin</p>
+                                <p class="font-semibold" id="commodity-exposure">₹0.00</p>
+                            </div>
+                            <div>
+                                <p class="text-sm text-base-content/60">Adhoc Margin</p>
+                                <p class="font-semibold" id="commodity-adhoc">₹0.00</p>
+                            </div>
+                            <div>
+                                <p class="text-sm text-base-content/60">Notional Cash</p>
+                                <p class="font-semibold" id="commodity-notional">₹0.00</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="commodity-error" class="hidden alert alert-error">
+                <svg xmlns="http://www.w3.org/2000/svg" class="stroke-current shrink-0 h-6 w-6" fill="none" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <span>Failed to load commodity funds data</span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Summary Card -->
+<div class="card bg-gradient-upstox text-white shadow-xl">
+    <div class="card-body">
+        <h2 class="card-title text-2xl">
+            <i class="fas fa-chart-pie mr-2"></i>
+            Total Summary
+        </h2>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
+            <div class="text-center">
+                <p class="text-white/80">Total Available</p>
+                <p class="text-3xl font-bold" id="total-available">₹0.00</p>
+            </div>
+            <div class="text-center">
+                <p class="text-white/80">Total Used</p>
+                <p class="text-3xl font-bold" id="total-used">₹0.00</p>
+            </div>
+            <div class="text-center">
+                <p class="text-white/80">Total Payin</p>
+                <p class="text-3xl font-bold" id="total-payin">₹0.00</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Refresh Button -->
+<div class="fixed bottom-8 right-8">
+    <button onclick="loadFunds()" class="btn btn-circle btn-lg btn-primary shadow-lg pulse-animation">
+        <i class="fas fa-sync-alt text-xl"></i>
+    </button>
+</div>
+
+<!-- Info Alert -->
+<div class="alert alert-info mt-8">
+    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="stroke-current shrink-0 w-6 h-6">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+    </svg>
+    <span>
+        <strong>Note:</strong> Funds service is unavailable daily from 12:00 AM to 5:30 AM IST due to maintenance.
+    </span>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    function formatCurrency(amount) {
+        return new Intl.NumberFormat('en-IN', {
+            style: 'currency',
+            currency: 'INR',
+            minimumFractionDigits: 2
+        }).format(amount);
+    }
+
+    function updateFundDisplay(segment, data) {
+        const loadingEl = document.getElementById(`${segment}-loading`);
+        const fundsEl = document.getElementById(`${segment}-funds`);
+        const errorEl = document.getElementById(`${segment}-error`);
+
+        loadingEl.classList.add('hidden');
+
+        if (data) {
+            fundsEl.classList.remove('hidden');
+            errorEl.classList.add('hidden');
+
+            document.getElementById(`${segment}-available`).textContent = formatCurrency(data.available_margin || 0);
+            document.getElementById(`${segment}-used`).textContent = formatCurrency(data.used_margin || 0);
+            document.getElementById(`${segment}-payin`).textContent = formatCurrency(data.payin_amount || 0);
+            document.getElementById(`${segment}-span`).textContent = formatCurrency(data.span_margin || 0);
+            document.getElementById(`${segment}-exposure`).textContent = formatCurrency(data.exposure_margin || 0);
+            document.getElementById(`${segment}-adhoc`).textContent = formatCurrency(data.adhoc_margin || 0);
+            document.getElementById(`${segment}-notional`).textContent = formatCurrency(data.notional_cash || 0);
+        } else {
+            fundsEl.classList.add('hidden');
+            errorEl.classList.remove('hidden');
+        }
+    }
+
+    function updateTotalSummary(equityData, commodityData) {
+        const totalAvailable = (equityData?.available_margin || 0) + (commodityData?.available_margin || 0);
+        const totalUsed = (equityData?.used_margin || 0) + (commodityData?.used_margin || 0);
+        const totalPayin = (equityData?.payin_amount || 0) + (commodityData?.payin_amount || 0);
+
+        document.getElementById('total-available').textContent = formatCurrency(totalAvailable);
+        document.getElementById('total-used').textContent = formatCurrency(totalUsed);
+        document.getElementById('total-payin').textContent = formatCurrency(totalPayin);
+    }
+
+    async function loadFunds() {
+        // Show loading states
+        document.getElementById('equity-loading').classList.remove('hidden');
+        document.getElementById('commodity-loading').classList.remove('hidden');
+        document.getElementById('equity-funds').classList.add('hidden');
+        document.getElementById('commodity-funds').classList.add('hidden');
+
+        try {
+            const response = await fetch('/api/funds');
+            const result = await response.json();
+
+            if (response.ok && result.status === 'success') {
+                const equityData = result.data?.equity;
+                const commodityData = result.data?.commodity;
+
+                updateFundDisplay('equity', equityData);
+                updateFundDisplay('commodity', commodityData);
+                updateTotalSummary(equityData, commodityData);
+            } else {
+                throw new Error(result.error || 'Failed to fetch funds');
+            }
+        } catch (error) {
+            console.error('Error loading funds:', error);
+            updateFundDisplay('equity', null);
+            updateFundDisplay('commodity', null);
+        }
+    }
+
+    // Load funds on page load
+    document.addEventListener('DOMContentLoaded', loadFunds);
+
+    // Auto-refresh every 30 seconds
+    setInterval(loadFunds, 30000);
+</script>
+{% endblock %}
