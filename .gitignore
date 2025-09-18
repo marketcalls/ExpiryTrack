@@ -211,10 +211,13 @@ __pycache__/
 
 # Output files
 output/
-exports/
-*.csv
-*.xlsx
-*.parquet
+exports/*.csv
+exports/*.xlsx
+exports/*.json
+exports/*.parquet
+# Keep the exports directory and README
+!exports/README.md
+!exports/.gitkeep
 
 # Development files
 .ipynb_checkpoints/
@@ -241,4 +244,8 @@ nul
 !.env.example
 !requirements.txt
 !data/.gitkeep
+!data/README.md
 !logs/.gitkeep
+!logs/README.md
+!instance/README.md
+!flask_session/README.md

@@ -17,6 +17,7 @@ ExpiryTrack is a modern web application that systematically collects, stores, an
 - **⚡ Real-Time Progress**: Live monitoring with detailed logs and statistics
 - **🔄 Async Processing**: Efficient background task management
 - **🛡️ Secure**: OAuth 2.0 authentication with encrypted storage
+- **📤 Easy Data Export**: Export historical data using OpenAlgo symbols in CSV, Excel, or JSON formats
 
 ## 🚀 Quick Start
 
@@ -53,6 +54,8 @@ source venv/bin/activate
 ```bash
 pip install -r requirements.txt
 ```
+
+Note: This installs all dependencies including `openpyxl` for Excel export functionality.
 
 #### 4. Run the Application
 
@@ -161,7 +164,127 @@ ExpiryTrack/
 ### Data Structure
 - **Historical Data**: 1-minute OHLCV candles with timestamps
 - **Contract Info**: Strike prices, expiry dates, instrument keys
+- **OpenAlgo Symbols**: User-friendly symbology for easy querying
 - **Collection Metadata**: Task status, progress, logs
+
+## 🔤 OpenAlgo Symbology
+
+ExpiryTrack includes **OpenAlgo symbology** - a standardized, user-friendly format for F&O symbols that makes querying the database intuitive and efficient.
+
+### Symbol Format
+
+#### Futures
+Format: `[BaseSymbol][DDMMMYY]FUT`
+- Example: `BANKNIFTY28MAR24FUT` (Bank Nifty futures expiring March 28, 2024)
+
+#### Options
+Format: `[BaseSymbol][DDMMMYY][Strike][CE/PE]`
+- Example: `NIFTY28MAR2420800CE` (Nifty 20800 Call expiring March 28, 2024)
+- Example: `BANKNIFTY25APR2447500PE` (Bank Nifty 47500 Put expiring April 25, 2024)
+
+### Supported Base Symbols
+
+**NSE Index:**
+- `NIFTY` - Nifty 50
+- `BANKNIFTY` - Bank Nifty
+- `FINNIFTY` - Fin Nifty
+- `MIDCPNIFTY` - Midcap Nifty
+
+**BSE Index:**
+- `SENSEX` - Sensex
+- `BANKEX` - Bankex
+- `SENSEX50` - Sensex 50
+
+### Database Queries
+
+Query contracts using OpenAlgo symbols:
+
+```python
+# Get specific contract
+contract = db.get_contract_by_openalgo_symbol('NIFTY28MAR2420800CE')
+
+# Get all BANKNIFTY contracts
+contracts = db.get_contracts_by_base_symbol('BANKNIFTY')
+
+# Get option chain
+chain = db.get_option_chain('NIFTY', '2024-03-28')
+
+# Get futures
+futures = db.get_futures_by_symbol('BANKNIFTY')
+
+# Search symbols
+results = db.search_openalgo_symbols('MAR24')
+```
+
+### SQL Examples
+
+```sql
+-- Get specific option
+SELECT * FROM contracts
+WHERE openalgo_symbol = 'NIFTY28MAR2420800CE';
+
+-- Get all BANKNIFTY options for March
+SELECT * FROM contracts
+WHERE openalgo_symbol LIKE 'BANKNIFTY%MAR24%'
+AND (openalgo_symbol LIKE '%CE' OR openalgo_symbol LIKE '%PE');
+
+-- Get futures expiring in April
+SELECT * FROM contracts
+WHERE openalgo_symbol LIKE '%APR24FUT';
+```
+
+## 📤 Exporting Data
+
+ExpiryTrack includes a powerful export tool that uses OpenAlgo symbols to export historical data in multiple formats.
+
+### Quick Export Examples
+
+```bash
+# Export single symbol to CSV (default)
+python export_openalgo_data.py NIFTY28AUG25FUT
+
+# Export to Excel format with two sheets (data + metadata)
+python export_openalgo_data.py NIFTY28AUG2522600CE --format excel
+
+# Export to JSON format
+python export_openalgo_data.py BANKNIFTY28AUG2547500PE --format json
+
+# Export to custom directory
+python export_openalgo_data.py NIFTY28AUG25FUT --output my_exports
+```
+
+### Search and Batch Export
+
+```bash
+# Search for all NIFTY August 2025 contracts
+python export_openalgo_data.py --search NIFTY28AUG25
+
+# Export all matching contracts with auto-confirmation
+python export_openalgo_data.py --search NIFTY28AUG25 --auto --format excel
+
+# Export all 22600 strike options
+python export_openalgo_data.py --search 22600 --auto
+```
+
+### Export Output
+
+Files are saved in the `exports` directory with timestamps:
+- **CSV**: Simple format with timestamp, OHLC, volume, open_interest
+- **Excel**: Two sheets - Historical Data and Contract Info
+- **JSON**: Structured format with contract metadata and historical data
+
+Example output:
+```
+Exporting data for: NIFTY28AUG25FUT
+Trading Symbol: NIFTY FUT 28 AUG 25
+Contract Type: FUT
+Expiry Date: 2025-08-28
+Total Data Points: 23250
+
+Exported to: exports/NIFTY28AUG25FUT_20250918_224910.csv
+```
+
+For detailed export documentation, see [EXPORT_GUIDE.md](EXPORT_GUIDE.md)
 
 ## 🔧 Configuration (Optional)
 

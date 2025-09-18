@@ -2,7 +2,7 @@
 ExpiryTrack Web Interface - Flask Application
 """
 import asyncio
-from flask import Flask, render_template, redirect, url_for, request, session, jsonify
+from flask import Flask, render_template, redirect, url_for, request, session, jsonify, flash
 from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime
 import json
@@ -116,9 +116,12 @@ def upstox_callback():
         loop.close()
 
         if success:
-            return redirect(url_for('dashboard'))
+            # Redirect to home page after successful login
+            flash('Successfully authenticated with Upstox! You can now start collecting data.', 'success')
+            return redirect(url_for('index'))
         else:
-            return "Failed to exchange code for token", 500
+            flash('Failed to authenticate with Upstox. Please try again.', 'error')
+            return redirect(url_for('settings'))
 
     return "No authorization code received", 400
 

@@ -1,0 +1,2 @@
+# This file ensures the data directory is tracked by Git
+# The actual database file (expirytrack.db) should be gitignored

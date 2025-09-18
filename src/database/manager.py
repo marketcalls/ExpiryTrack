@@ -69,6 +69,24 @@ class DatabaseManager:
         with self.get_connection() as conn:
             cursor = conn.cursor()
 
+            # Check if contracts table exists and needs migration
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='contracts'")
+            if cursor.fetchone():
+                # Table exists, check for openalgo_symbol column
+                cursor.execute("PRAGMA table_info(contracts)")
+                columns = [col[1] for col in cursor.fetchall()]
+
+                if 'openalgo_symbol' not in columns:
+                    # Add the new column to existing table
+                    cursor.execute("ALTER TABLE contracts ADD COLUMN openalgo_symbol TEXT")
+                    conn.commit()
+                    logger.info("Added openalgo_symbol column to contracts table")
+
+                    # Create index for the new column
+                    cursor.execute("CREATE INDEX IF NOT EXISTS idx_openalgo_symbol ON contracts(openalgo_symbol)")
+                    conn.commit()
+                    logger.info("Created index for openalgo_symbol column")
+
             # Create credentials table for encrypted storage
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS credentials (
@@ -132,6 +150,7 @@ class DatabaseManager:
                     contract_type TEXT NOT NULL,
                     strike_price DECIMAL(10,2),
                     trading_symbol TEXT NOT NULL,
+                    openalgo_symbol TEXT,  -- OpenAlgo symbology for easy querying
                     lot_size INTEGER,
                     tick_size DECIMAL(10,2),
                     exchange_token TEXT,
@@ -183,6 +202,7 @@ class DatabaseManager:
                 "CREATE INDEX IF NOT EXISTS idx_expiry_date ON contracts(expiry_date)",
                 "CREATE INDEX IF NOT EXISTS idx_contract_type ON contracts(contract_type)",
                 "CREATE INDEX IF NOT EXISTS idx_strike_price ON contracts(strike_price)",
+                "CREATE INDEX IF NOT EXISTS idx_openalgo_symbol ON contracts(openalgo_symbol)",  # Index for OpenAlgo symbols
                 "CREATE INDEX IF NOT EXISTS idx_instrument_expiry ON contracts(instrument_key, expiry_date)",
                 "CREATE INDEX IF NOT EXISTS idx_historical_date ON historical_data(DATE(timestamp))",
                 "CREATE INDEX IF NOT EXISTS idx_historical_instrument ON historical_data(expired_instrument_key)",
@@ -350,6 +370,8 @@ class DatabaseManager:
     # Contract operations
     def insert_contracts(self, contracts: List[Dict]) -> int:
         """Insert multiple contracts"""
+        from ..utils.openalgo_symbol import to_openalgo_symbol
+
         with self.get_connection() as conn:
             cursor = conn.cursor()
             count = 0
@@ -359,12 +381,15 @@ class DatabaseManager:
                     # Extract expired instrument key
                     expired_key = contract.get('instrument_key', '')
 
+                    # Generate OpenAlgo symbol
+                    openalgo_symbol = to_openalgo_symbol(contract)
+
                     cursor.execute("""
                         INSERT OR REPLACE INTO contracts
                         (expired_instrument_key, instrument_key, expiry_date,
-                         contract_type, strike_price, trading_symbol, lot_size,
-                         tick_size, exchange_token, freeze_quantity, minimum_lot, metadata)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                         contract_type, strike_price, trading_symbol, openalgo_symbol,
+                         lot_size, tick_size, exchange_token, freeze_quantity, minimum_lot, metadata)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, (
                         expired_key,
                         contract.get('underlying_key', ''),
@@ -372,6 +397,7 @@ class DatabaseManager:
                         contract.get('instrument_type', ''),  # CE, PE, FUT
                         contract.get('strike_price'),
                         contract.get('trading_symbol', ''),
+                        openalgo_symbol,  # Add OpenAlgo symbol
                         contract.get('lot_size'),
                         contract.get('tick_size'),
                         contract.get('exchange_token', ''),
@@ -567,6 +593,81 @@ class DatabaseManager:
             stats['pending_contracts'] = cursor.fetchone()[0]
 
             return stats
+
+    # OpenAlgo symbol queries
+    def get_contract_by_openalgo_symbol(self, openalgo_symbol: str) -> Optional[Dict]:
+        """Get contract by OpenAlgo symbol"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT * FROM contracts
+                WHERE openalgo_symbol = ?
+            """, (openalgo_symbol,))
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
+    def get_contracts_by_base_symbol(self, base_symbol: str) -> List[Dict]:
+        """Get all contracts for a base symbol (e.g., 'NIFTY', 'BANKNIFTY')"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT * FROM contracts
+                WHERE openalgo_symbol LIKE ?
+                ORDER BY expiry_date, strike_price
+            """, (f"{base_symbol}%",))
+            return [dict(row) for row in cursor.fetchall()]
+
+    def get_option_chain(self, base_symbol: str, expiry_date: str) -> Dict[str, List[Dict]]:
+        """Get option chain for a symbol and expiry"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+
+            # Format expiry date for OpenAlgo format (DDMMMYY)
+            from ..utils.openalgo_symbol import OpenAlgoSymbolGenerator
+            formatted_date = OpenAlgoSymbolGenerator.format_expiry_date(expiry_date)
+
+            # Get calls
+            cursor.execute("""
+                SELECT * FROM contracts
+                WHERE openalgo_symbol LIKE ? AND openalgo_symbol LIKE '%CE'
+                ORDER BY strike_price
+            """, (f"{base_symbol}{formatted_date}%",))
+            calls = [dict(row) for row in cursor.fetchall()]
+
+            # Get puts
+            cursor.execute("""
+                SELECT * FROM contracts
+                WHERE openalgo_symbol LIKE ? AND openalgo_symbol LIKE '%PE'
+                ORDER BY strike_price
+            """, (f"{base_symbol}{formatted_date}%",))
+            puts = [dict(row) for row in cursor.fetchall()]
+
+            return {"calls": calls, "puts": puts}
+
+    def get_futures_by_symbol(self, base_symbol: str) -> List[Dict]:
+        """Get all futures contracts for a symbol"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT * FROM contracts
+                WHERE openalgo_symbol LIKE ? AND openalgo_symbol LIKE '%FUT'
+                ORDER BY expiry_date
+            """, (f"{base_symbol}%",))
+            return [dict(row) for row in cursor.fetchall()]
+
+    def search_openalgo_symbols(self, pattern: str) -> List[Dict]:
+        """Search for contracts by OpenAlgo symbol pattern"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT openalgo_symbol, trading_symbol, expiry_date,
+                       contract_type, strike_price
+                FROM contracts
+                WHERE openalgo_symbol LIKE ?
+                ORDER BY openalgo_symbol
+                LIMIT 100
+            """, (f"%{pattern}%",))
+            return [dict(row) for row in cursor.fetchall()]
 
     def vacuum(self) -> None:
         """Optimize database (SQLite)"""
