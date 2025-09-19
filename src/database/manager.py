@@ -87,6 +87,19 @@ class DatabaseManager:
                     conn.commit()
                     logger.info("Created index for openalgo_symbol column")
 
+            # Check if historical_data table exists and needs oi column
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='historical_data'")
+            if cursor.fetchone():
+                # Table exists, check for oi column
+                cursor.execute("PRAGMA table_info(historical_data)")
+                columns = [col[1] for col in cursor.fetchall()]
+
+                if 'oi' not in columns and 'open_interest' not in columns:
+                    # Add the oi column to existing table
+                    cursor.execute("ALTER TABLE historical_data ADD COLUMN oi BIGINT DEFAULT 0")
+                    conn.commit()
+                    logger.info("Added oi column to historical_data table")
+
             # Create credentials table for encrypted storage
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS credentials (
@@ -173,7 +186,7 @@ class DatabaseManager:
                     low DECIMAL(10,2) NOT NULL,
                     close DECIMAL(10,2) NOT NULL,
                     volume BIGINT NOT NULL,
-                    open_interest BIGINT,
+                    oi BIGINT DEFAULT 0,
                     PRIMARY KEY (expired_instrument_key, timestamp),
                     FOREIGN KEY (expired_instrument_key) REFERENCES contracts(expired_instrument_key)
                 )
@@ -472,7 +485,7 @@ class DatabaseManager:
                 try:
                     cursor.executemany("""
                         INSERT OR REPLACE INTO historical_data
-                        (expired_instrument_key, timestamp, open, high, low, close, volume, open_interest)
+                        (expired_instrument_key, timestamp, open, high, low, close, volume, oi)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """, data_to_insert)
 
@@ -668,6 +681,63 @@ class DatabaseManager:
                 LIMIT 100
             """, (f"%{pattern}%",))
             return [dict(row) for row in cursor.fetchall()]
+
+    def get_expiries_for_instrument(self, instrument: str) -> List[str]:
+        """Get all unique expiry dates for an instrument from the database
+
+        Args:
+            instrument: Instrument key (e.g., 'NSE_INDEX|Nifty 50')
+
+        Returns:
+            List of expiry dates as strings
+        """
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT DISTINCT expiry_date FROM contracts
+                WHERE instrument_key = ?
+                ORDER BY expiry_date DESC
+            """, (instrument,))
+            return [row[0] for row in cursor.fetchall()]
+
+    def get_contracts_for_expiry(self, instrument: str, expiry_date: str) -> List[Dict]:
+        """Get all contracts for an instrument and expiry date
+
+        Args:
+            instrument: Instrument key
+            expiry_date: Expiry date string
+
+        Returns:
+            List of contract dictionaries
+        """
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT * FROM contracts
+                WHERE instrument_key = ?
+                AND expiry_date = ?
+                ORDER BY strike_price, contract_type
+            """, (instrument, expiry_date))
+            return [dict(row) for row in cursor.fetchall()]
+
+    def get_historical_data(self, expired_instrument_key: str) -> List[List]:
+        """Get historical data for a specific expired instrument
+
+        Args:
+            expired_instrument_key: The expired instrument key
+
+        Returns:
+            List of candles [timestamp, open, high, low, close, volume, oi]
+        """
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT timestamp, open, high, low, close, volume, oi
+                FROM historical_data
+                WHERE expired_instrument_key = ?
+                ORDER BY timestamp
+            """, (expired_instrument_key,))
+            return [list(row) for row in cursor.fetchall()]
 
     def vacuum(self) -> None:
         """Optimize database (SQLite)"""

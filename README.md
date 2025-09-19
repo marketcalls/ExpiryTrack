@@ -17,7 +17,9 @@ ExpiryTrack is a modern web application that systematically collects, stores, an
 - **⚡ Real-Time Progress**: Live monitoring with detailed logs and statistics
 - **🔄 Async Processing**: Efficient background task management
 - **🛡️ Secure**: OAuth 2.0 authentication with encrypted storage
-- **📤 Easy Data Export**: Export historical data using OpenAlgo symbols in CSV, Excel, or JSON formats
+- **📤 Easy Data Export**: Web-based export wizard and CLI tool for CSV, JSON, and ZIP formats
+- **📅 Separate Date/Time Columns**: Exports include individual date and time columns for easy analysis
+- **💹 Open Interest Data**: Full OI (Open Interest) data included in exports
 
 ## 🚀 Quick Start
 
@@ -167,7 +169,11 @@ ExpiryTrack/
 │   ├── settings.html    # Settings page
 │   ├── dashboard.html   # Dashboard
 │   ├── collect_wizard.html # Collection wizard
+│   ├── export_wizard.html  # Export wizard
 │   └── status.html      # Status page
+├── src/export/          # Export functionality
+│   └── exporter.py      # Data export logic
+├── exports/             # Exported data files
 ├── data/                 # Database storage
 ├── logs/                 # Application logs
 └── design/              # Documentation
@@ -254,7 +260,37 @@ WHERE openalgo_symbol LIKE '%APR24FUT';
 
 ## 📤 Exporting Data
 
-ExpiryTrack includes a powerful export tool that uses OpenAlgo symbols to export historical data in multiple formats.
+ExpiryTrack provides two powerful ways to export historical data using OpenAlgo symbols:
+
+### Web-Based Export Wizard
+
+Navigate to "Export Data" in the web interface to use the intuitive 4-step export wizard:
+
+#### Step 1: Select Instruments
+- Choose from configured instruments (Nifty 50, Bank Nifty, Sensex)
+- Select multiple instruments for batch export
+
+#### Step 2: Choose Expiry Dates
+- View available expiries for selected instruments
+- Select specific expiries or use "Select All"
+- Shows expiry count per instrument
+
+#### Step 3: Export Options
+- **Format**: CSV, JSON, or ZIP archive
+- **Include OpenAlgo Symbols**: Add standardized symbology
+- **Include Metadata**: Add contract details (strike, option type)
+- **Time Range**: All data or specific periods
+- **Separate Files**: Export each contract individually
+
+#### Step 4: Review & Export
+- Review summary of selections
+- Click "Start Export" to begin
+- Real-time progress tracking
+- Download link provided when complete
+
+### Command-Line Export Tool
+
+ExpiryTrack also includes a powerful command-line export tool for automation and scripting.
 
 ### Quick Export Examples
 
@@ -288,9 +324,10 @@ python export_openalgo_data.py --search 22600 --auto
 ### Export Output
 
 Files are saved in the `exports` directory with timestamps:
-- **CSV**: Simple format with timestamp, OHLC, volume, open_interest
+- **CSV**: Contains columns in order: `openalgo_symbol, date, time, timestamp, open, high, low, close, volume, oi`
 - **Excel**: Two sheets - Historical Data and Contract Info
 - **JSON**: Structured format with contract metadata and historical data
+- **ZIP**: Archive containing multiple CSV files (when separate files option is selected)
 
 Example output:
 ```
@@ -304,6 +341,31 @@ Exported to: exports/NIFTY28AUG25FUT_20250918_224910.csv
 ```
 
 For detailed export documentation, see [EXPORT_GUIDE.md](EXPORT_GUIDE.md)
+
+## 🔍 Export Features
+
+### Data Columns in Exports
+
+All exports include the following columns:
+- **openalgo_symbol**: Standardized F&O symbol (e.g., NIFTY16SEP25C22700)
+- **date**: Trading date (YYYY-MM-DD)
+- **time**: Trading time (HH:MM:SS)
+- **timestamp**: Full ISO timestamp
+- **open**: Opening price
+- **high**: High price
+- **low**: Low price
+- **close**: Closing price
+- **volume**: Trading volume
+- **oi**: Open Interest
+
+### Metadata Columns (Optional)
+
+When metadata is included:
+- **instrument**: Instrument name
+- **expiry**: Expiry date
+- **strike**: Strike price
+- **option_type**: CE (Call) or PE (Put) or FUT (Futures)
+- **trading_symbol**: Original trading symbol
 
 ## 🔧 Configuration (Optional)
 

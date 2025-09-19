@@ -68,6 +68,16 @@ ExpiryTrack automates the entire workflow of:
 - Data compression and indexing
 - Explicit transaction commits for data integrity
 
+### 6. Data Export Capabilities
+- **Web-Based Export Wizard**: 4-step intuitive interface for data export
+- **Multiple Export Formats**: CSV, JSON, and ZIP archives
+- **OpenAlgo Symbol Format**: Standardized F&O symbology (e.g., NIFTY16SEP25C22700)
+- **Flexible Data Selection**: Export by instrument, expiry, and contract type
+- **Enhanced CSV Format**: Includes separate date/time columns and open interest data
+- **Batch Export**: Export multiple contracts simultaneously
+- **Command-Line Tool**: Python script for automated exports
+- **Real-Time Progress**: Track export status with live updates
+
 ## System Architecture
 
 ### Components Overview
@@ -280,9 +290,21 @@ Implementation approach:
 1. **Direct Database Access**
    - SQLite/DuckDB connection
    - SQL queries for analysis
-   - Export capabilities
+   - OpenAlgo symbol-based queries
 
-2. **API Access** (Future Enhancement)
+2. **Web-Based Export**
+   - Interactive export wizard
+   - Real-time progress tracking
+   - Download management
+   - Format selection (CSV/JSON/ZIP)
+
+3. **Command-Line Export**
+   - Python script for automation
+   - Batch export support
+   - Search and filter capabilities
+   - Scheduled export tasks
+
+4. **API Access** (Future Enhancement)
    - REST endpoints for data retrieval
    - Pagination support
    - Filter and aggregation options
@@ -335,8 +357,11 @@ Implementation approach:
 ### Phase 1 (Current)
 - ✅ Basic authentication
 - ✅ Core API integration
-- 🔄 Database schema implementation
-- 🔄 Basic data collection
+- ✅ Database schema implementation
+- ✅ Basic data collection
+- ✅ Web-based export wizard
+- ✅ OpenAlgo symbol support
+- ✅ Multi-format exports (CSV/JSON/ZIP)
 
 ### Phase 2 (Next Quarter)
 - Advanced scheduling system

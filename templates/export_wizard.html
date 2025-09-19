@@ -1,0 +1,447 @@
+{% extends "base.html" %}
+
+{% block title %}Export Data - ExpiryTrack{% endblock %}
+
+{% block content %}
+<div class="container mx-auto px-4 py-8">
+    <div class="max-w-4xl mx-auto">
+        <!-- Header -->
+        <div class="flex items-center justify-between mb-8">
+            <div>
+                <h1 class="text-3xl font-bold text-gray-900">Export Data Wizard</h1>
+                <p class="text-gray-600 mt-2">Export your collected data in various formats</p>
+            </div>
+            <a href="{{ url_for('index') }}" class="btn bg-gray-100 text-gray-700 hover:bg-gray-200 font-medium py-2 px-4 rounded-lg">
+                <i class="fas fa-arrow-left mr-2"></i> Back
+            </a>
+        </div>
+
+        <!-- Progress Steps -->
+        <div class="mb-8">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center">
+                    <div id="step1-circle" class="w-10 h-10 bg-green-500 text-white rounded-full flex items-center justify-center font-bold">1</div>
+                    <span class="ml-3 text-gray-700 font-medium">Select Instruments</span>
+                </div>
+                <div class="flex-1 h-1 bg-gray-300 mx-4"></div>
+                <div class="flex items-center">
+                    <div id="step2-circle" class="w-10 h-10 bg-gray-300 text-gray-600 rounded-full flex items-center justify-center font-bold">2</div>
+                    <span class="ml-3 text-gray-600">Select Expiries</span>
+                </div>
+                <div class="flex-1 h-1 bg-gray-300 mx-4"></div>
+                <div class="flex items-center">
+                    <div id="step3-circle" class="w-10 h-10 bg-gray-300 text-gray-600 rounded-full flex items-center justify-center font-bold">3</div>
+                    <span class="ml-3 text-gray-600">Export Options</span>
+                </div>
+                <div class="flex-1 h-1 bg-gray-300 mx-4"></div>
+                <div class="flex items-center">
+                    <div id="step4-circle" class="w-10 h-10 bg-gray-300 text-gray-600 rounded-full flex items-center justify-center font-bold">4</div>
+                    <span class="ml-3 text-gray-600">Download</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Wizard Card -->
+        <div class="card">
+            <!-- Step 1: Select Instruments -->
+            <div id="step1" class="step">
+                <h2 class="text-xl font-semibold mb-4">Step 1: Select Instruments</h2>
+                <p class="text-gray-600 mb-6">Choose which instruments to export data for</p>
+
+                <div class="space-y-4">
+                    <label class="flex items-center p-4 border-2 border-gray-200 rounded-lg hover:border-green-400 cursor-pointer">
+                        <input type="checkbox" value="NSE_INDEX|Nifty 50" class="instrument-checkbox mr-3 w-5 h-5 text-green-500">
+                        <div>
+                            <div class="font-medium">NIFTY 50</div>
+                            <div class="text-sm text-gray-500">NSE Index - India's benchmark stock market index</div>
+                        </div>
+                    </label>
+
+                    <label class="flex items-center p-4 border-2 border-gray-200 rounded-lg hover:border-green-400 cursor-pointer">
+                        <input type="checkbox" value="NSE_INDEX|Nifty Bank" class="instrument-checkbox mr-3 w-5 h-5 text-green-500">
+                        <div>
+                            <div class="font-medium">BANK NIFTY</div>
+                            <div class="text-sm text-gray-500">NSE Index - Banking sector index</div>
+                        </div>
+                    </label>
+
+                    <label class="flex items-center p-4 border-2 border-gray-200 rounded-lg hover:border-green-400 cursor-pointer">
+                        <input type="checkbox" value="BSE_INDEX|SENSEX" class="instrument-checkbox mr-3 w-5 h-5 text-green-500">
+                        <div>
+                            <div class="font-medium">SENSEX</div>
+                            <div class="text-sm text-gray-500">BSE Index - Bombay Stock Exchange benchmark</div>
+                        </div>
+                    </label>
+                </div>
+            </div>
+
+            <!-- Step 2: Select Expiries -->
+            <div id="step2" class="step hidden">
+                <h2 class="text-xl font-semibold mb-4">Step 2: Select Expiry Dates</h2>
+                <p class="text-gray-600 mb-6">Choose which expiry dates to include in the export</p>
+
+                <div id="expiry-selection" class="space-y-4">
+                    <!-- Expiries will be populated dynamically -->
+                    <div class="text-center py-8 text-gray-500">
+                        <i class="fas fa-spinner fa-spin text-2xl mb-3"></i>
+                        <p>Loading available expiries...</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Step 3: Export Options -->
+            <div id="step3" class="step hidden">
+                <h2 class="text-xl font-semibold mb-4">Step 3: Export Options</h2>
+                <p class="text-gray-600 mb-6">Configure your export settings</p>
+
+                <div class="space-y-6">
+                    <!-- Export Format -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-3">Export Format</label>
+                        <div class="space-y-3">
+                            <label class="flex items-center p-4 border-2 border-gray-200 rounded-lg hover:border-green-400 cursor-pointer">
+                                <input type="radio" name="format" value="csv" class="mr-3" checked>
+                                <div>
+                                    <div class="font-medium">CSV Format</div>
+                                    <div class="text-sm text-gray-500">Comma-separated values, compatible with Excel</div>
+                                </div>
+                            </label>
+
+                            <label class="flex items-center p-4 border-2 border-gray-200 rounded-lg hover:border-green-400 cursor-pointer">
+                                <input type="radio" name="format" value="json" class="mr-3">
+                                <div>
+                                    <div class="font-medium">JSON Format</div>
+                                    <div class="text-sm text-gray-500">JavaScript Object Notation for programmatic use</div>
+                                </div>
+                            </label>
+
+                            <label class="flex items-center p-4 border-2 border-gray-200 rounded-lg hover:border-green-400 cursor-pointer">
+                                <input type="radio" name="format" value="zip" class="mr-3">
+                                <div>
+                                    <div class="font-medium">ZIP Archive</div>
+                                    <div class="text-sm text-gray-500">Compressed archive with separate files per expiry</div>
+                                </div>
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- Data Options -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-3">Data Options</label>
+                        <div class="space-y-2">
+                            <label class="flex items-center">
+                                <input type="checkbox" id="include-openalgo" class="mr-3" checked>
+                                <span>Include OpenAlgo Symbol Format (First Column)</span>
+                            </label>
+                            <label class="flex items-center">
+                                <input type="checkbox" id="include-metadata" class="mr-3" checked>
+                                <span>Include Contract Metadata (Strike, Type, etc.)</span>
+                            </label>
+                            <label class="flex items-center">
+                                <input type="checkbox" id="separate-files" class="mr-3">
+                                <span>Separate Files per Contract Type (CE/PE)</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- Time Range -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-3">Time Range</label>
+                        <select id="time-range" class="w-full p-3 border border-gray-300 rounded-lg">
+                            <option value="all">All Available Data</option>
+                            <option value="1d">Last Day Before Expiry</option>
+                            <option value="7d">Last 7 Days Before Expiry</option>
+                            <option value="30d">Last 30 Days Before Expiry</option>
+                            <option value="90d">Last 90 Days Before Expiry</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Step 4: Download -->
+            <div id="step4" class="step hidden">
+                <h2 class="text-xl font-semibold mb-4">Step 4: Export & Download</h2>
+                <p class="text-gray-600 mb-6">Review your selections and start the export</p>
+
+                <!-- Export Summary -->
+                <div class="bg-gray-50 rounded-lg p-4 mb-6">
+                    <h3 class="font-semibold mb-3">Export Summary</h3>
+                    <div class="space-y-2 text-sm">
+                        <div class="flex justify-between">
+                            <span class="text-gray-600">Instruments:</span>
+                            <span id="summary-instruments" class="font-medium">-</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-gray-600">Expiries:</span>
+                            <span id="summary-expiries" class="font-medium">-</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-gray-600">Format:</span>
+                            <span id="summary-format" class="font-medium">-</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-gray-600">OpenAlgo Symbol:</span>
+                            <span id="summary-openalgo" class="font-medium">Yes</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Export Progress -->
+                <div id="export-progress" class="hidden">
+                    <div class="card-minimal p-6 border-green-200 bg-green-50">
+                        <h3 class="text-xl font-semibold mb-6 text-green-800">Export in Progress</h3>
+
+                        <!-- Progress Bar -->
+                        <div class="mb-6">
+                            <div class="bg-gray-200 rounded-full h-4 overflow-hidden">
+                                <div id="export-progress-bar" class="bg-green-500 h-full transition-all duration-300" style="width: 0%"></div>
+                            </div>
+                        </div>
+
+                        <!-- Status -->
+                        <div class="card-minimal p-4 border-gray-200 bg-gray-50 mb-4">
+                            <div class="text-sm font-medium text-gray-700" id="export-status">Preparing export...</div>
+                        </div>
+
+                        <!-- Download Link -->
+                        <div id="download-section" class="hidden text-center mt-6">
+                            <p class="text-green-600 font-semibold mb-4">Export completed successfully!</p>
+                            <a id="download-link" href="#" class="btn-supabase">
+                                <i class="fas fa-download mr-2"></i> Download File
+                            </a>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Start Export Button -->
+                <div id="start-export-section" class="text-center">
+                    <button id="start-export-btn" class="btn-supabase text-lg px-8 py-3">
+                        <i class="fas fa-file-export mr-2"></i> Start Export
+                    </button>
+                </div>
+            </div>
+
+            <!-- Navigation Buttons -->
+            <div class="flex justify-between mt-8">
+                <button id="prev-button" class="btn bg-gray-100 text-gray-700 hover:bg-gray-200 font-medium py-2 px-4 rounded-lg" onclick="previousStep()" style="display: none;">
+                    <i class="fas fa-arrow-left mr-2"></i> Previous
+                </button>
+                <button id="next-button" class="btn-supabase ml-auto" onclick="nextStep()">
+                    Next <i class="fas fa-arrow-right ml-2"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+let currentStep = 1;
+const totalSteps = 4;
+let selectedInstruments = [];
+let selectedExpiries = {};
+
+function showStep(step) {
+    // Hide all steps
+    for (let i = 1; i <= totalSteps; i++) {
+        document.getElementById(`step${i}`).classList.add('hidden');
+        document.getElementById(`step${i}-circle`).classList.remove('bg-green-500', 'text-white');
+        document.getElementById(`step${i}-circle`).classList.add('bg-gray-300', 'text-gray-600');
+    }
+
+    // Show current step
+    document.getElementById(`step${step}`).classList.remove('hidden');
+    document.getElementById(`step${step}-circle`).classList.remove('bg-gray-300', 'text-gray-600');
+    document.getElementById(`step${step}-circle`).classList.add('bg-green-500', 'text-white');
+
+    // Update navigation buttons
+    document.getElementById('prev-button').style.display = step === 1 ? 'none' : '';
+    document.getElementById('next-button').textContent = step === totalSteps ? 'Start Export' : 'Next';
+
+    // Load data for specific steps
+    if (step === 2) {
+        loadExpiries();
+    } else if (step === 4) {
+        updateSummary();
+    }
+}
+
+function nextStep() {
+    if (currentStep === 1) {
+        // Validate instrument selection
+        selectedInstruments = Array.from(document.querySelectorAll('.instrument-checkbox:checked')).map(cb => cb.value);
+        if (selectedInstruments.length === 0) {
+            alert('Please select at least one instrument');
+            return;
+        }
+    } else if (currentStep === 2) {
+        // Validate expiry selection
+        const checkedExpiries = document.querySelectorAll('.expiry-checkbox:checked');
+        if (checkedExpiries.length === 0) {
+            alert('Please select at least one expiry date');
+            return;
+        }
+        // Store selected expiries
+        selectedExpiries = {};
+        checkedExpiries.forEach(cb => {
+            const [instrument, expiry] = cb.value.split('~~~');
+            if (!selectedExpiries[instrument]) {
+                selectedExpiries[instrument] = [];
+            }
+            selectedExpiries[instrument].push(expiry);
+        });
+    } else if (currentStep === 4) {
+        // Start export
+        startExport();
+        return;
+    }
+
+    if (currentStep < totalSteps) {
+        currentStep++;
+        showStep(currentStep);
+    }
+}
+
+function previousStep() {
+    if (currentStep > 1) {
+        currentStep--;
+        showStep(currentStep);
+    }
+}
+
+async function loadExpiries() {
+    const container = document.getElementById('expiry-selection');
+    container.innerHTML = '<div class="text-center py-8"><i class="fas fa-spinner fa-spin text-2xl"></i></div>';
+
+    try {
+        // Get available expiries from database
+        const response = await fetch('/api/export/available-expiries', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({instruments: selectedInstruments})
+        });
+
+        const data = await response.json();
+        let html = '';
+
+        for (const instrument of selectedInstruments) {
+            const instrumentName = instrument.split('|')[1];
+            const expiries = data[instrument] || [];
+
+            if (expiries.length > 0) {
+                html += `
+                    <div class="mb-6">
+                        <h4 class="font-semibold mb-3">${instrumentName}</h4>
+                        <div class="space-y-2 max-h-60 overflow-y-auto border rounded-lg p-3">
+                `;
+
+                expiries.forEach(expiry => {
+                    html += `
+                        <label class="flex items-center hover:bg-gray-50 p-2 rounded">
+                            <input type="checkbox" value="${instrument}~~~${expiry}" class="expiry-checkbox mr-3">
+                            <span>${expiry}</span>
+                        </label>
+                    `;
+                });
+
+                html += '</div></div>';
+            }
+        }
+
+        container.innerHTML = html || '<div class="text-center py-8 text-gray-500">No expiries available for selected instruments</div>';
+
+    } catch (error) {
+        console.error('Error loading expiries:', error);
+        container.innerHTML = '<div class="text-center py-8 text-red-500">Error loading expiries</div>';
+    }
+}
+
+function updateSummary() {
+    // Update instruments
+    const instrumentNames = selectedInstruments.map(i => i.split('|')[1]).join(', ');
+    document.getElementById('summary-instruments').textContent = instrumentNames;
+
+    // Update expiries count
+    let totalExpiries = 0;
+    for (const inst in selectedExpiries) {
+        totalExpiries += selectedExpiries[inst].length;
+    }
+    document.getElementById('summary-expiries').textContent = `${totalExpiries} selected`;
+
+    // Update format
+    const format = document.querySelector('input[name="format"]:checked').value;
+    document.getElementById('summary-format').textContent = format.toUpperCase();
+
+    // Update OpenAlgo
+    const includeOpenAlgo = document.getElementById('include-openalgo').checked;
+    document.getElementById('summary-openalgo').textContent = includeOpenAlgo ? 'Yes' : 'No';
+}
+
+async function startExport() {
+    // Hide start button, show progress
+    document.getElementById('start-export-section').classList.add('hidden');
+    document.getElementById('export-progress').classList.remove('hidden');
+
+    // Prepare export parameters
+    const params = {
+        instruments: selectedInstruments,
+        expiries: selectedExpiries,
+        format: document.querySelector('input[name="format"]:checked').value,
+        options: {
+            include_openalgo: document.getElementById('include-openalgo').checked,
+            include_metadata: document.getElementById('include-metadata').checked,
+            separate_files: document.getElementById('separate-files').checked,
+            time_range: document.getElementById('time-range').value
+        }
+    };
+
+    try {
+        const response = await fetch('/api/export/start', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(params)
+        });
+
+        const result = await response.json();
+
+        if (result.task_id) {
+            // Poll for export progress
+            pollExportProgress(result.task_id);
+        }
+    } catch (error) {
+        console.error('Export error:', error);
+        document.getElementById('export-status').textContent = 'Export failed: ' + error.message;
+    }
+}
+
+async function pollExportProgress(taskId) {
+    const interval = setInterval(async () => {
+        try {
+            const response = await fetch(`/api/export/status/${taskId}`);
+            const data = await response.json();
+
+            // Update progress bar
+            document.getElementById('export-progress-bar').style.width = `${data.progress}%`;
+
+            // Update status
+            document.getElementById('export-status').textContent = data.status_message || 'Processing...';
+
+            // Check if completed
+            if (data.status === 'completed') {
+                clearInterval(interval);
+                document.getElementById('download-section').classList.remove('hidden');
+                document.getElementById('download-link').href = `/api/export/download/${taskId}`;
+                document.getElementById('export-status').textContent = 'Export completed successfully!';
+            } else if (data.status === 'failed') {
+                clearInterval(interval);
+                document.getElementById('export-status').textContent = 'Export failed: ' + data.error;
+            }
+        } catch (error) {
+            console.error('Error checking export status:', error);
+        }
+    }, 1000);
+}
+
+// Initialize
+showStep(1);
+</script>
+{% endblock %}

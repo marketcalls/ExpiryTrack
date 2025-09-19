@@ -214,6 +214,7 @@ output/
 exports/*.csv
 exports/*.xlsx
 exports/*.json
+exports/*.zip
 exports/*.parquet
 # Keep the exports directory and README
 !exports/README.md

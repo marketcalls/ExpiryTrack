@@ -275,6 +275,153 @@ def help_page():
     """Help page with CLI commands and OpenAlgo documentation"""
     return render_template('help.html')
 
+# Export Routes
+@app.route('/export')
+def export_wizard():
+    """Export wizard page"""
+    if not auth_manager.has_credentials():
+        session['error'] = 'Please configure API credentials first'
+        return redirect(url_for('settings'))
+
+    if not auth_manager.is_token_valid():
+        session['error'] = 'Please authenticate first'
+        return redirect(url_for('login'))
+
+    return render_template('export_wizard.html')
+
+@app.route('/api/export/available-expiries', methods=['POST'])
+def api_export_available_expiries():
+    """Get available expiries for selected instruments"""
+    from src.export.exporter import DataExporter
+
+    data = request.json
+    instruments = data.get('instruments', [])
+
+    exporter = DataExporter(db_manager)
+    expiries = exporter.get_available_expiries(instruments)
+
+    return jsonify(expiries)
+
+# Global dictionary to store export tasks
+export_tasks = {}
+
+@app.route('/api/export/start', methods=['POST'])
+def api_export_start():
+    """Start export task"""
+    from src.export.exporter import DataExporter
+    import uuid
+    import threading
+
+    data = request.json
+    task_id = str(uuid.uuid4())
+
+    # Initialize task status
+    export_tasks[task_id] = {
+        'task_id': task_id,
+        'status': 'processing',
+        'progress': 0,
+        'status_message': 'Preparing export...',
+        'file_path': None,
+        'error': None
+    }
+
+    # Run export in background thread
+    def run_export():
+        try:
+            import logging
+            logging.basicConfig(level=logging.DEBUG)
+            logger = logging.getLogger(__name__)
+
+            logger.info(f"Starting export task {task_id}")
+            logger.debug(f"Export data: instruments={data.get('instruments')}, expiries={data.get('expiries')}, options={data.get('options')}")
+
+            exporter = DataExporter(db_manager)
+
+            # Update progress
+            export_tasks[task_id]['progress'] = 20
+            export_tasks[task_id]['status_message'] = 'Gathering data...'
+
+            format_type = data.get('format', 'csv')
+            instruments = data.get('instruments', [])
+            expiries = data.get('expiries', {})
+            options = data.get('options', {})
+
+            logger.info(f"Export parameters: format={format_type}, instruments={instruments}, expiries={expiries}")
+
+            # Update progress
+            export_tasks[task_id]['progress'] = 50
+            export_tasks[task_id]['status_message'] = f'Exporting to {format_type.upper()}...'
+
+            # Export based on format
+            logger.info(f"Starting {format_type} export...")
+            if format_type == 'csv':
+                file_path = exporter.export_to_csv(instruments, expiries, options, task_id)
+            elif format_type == 'json':
+                file_path = exporter.export_to_json(instruments, expiries, options, task_id)
+            elif format_type == 'zip':
+                file_path = exporter.export_to_zip(instruments, expiries, options, task_id)
+            else:
+                raise ValueError(f"Unknown format: {format_type}")
+
+            logger.info(f"Export completed: {file_path}")
+
+            # Update task status
+            export_tasks[task_id]['status'] = 'completed'
+            export_tasks[task_id]['progress'] = 100
+            export_tasks[task_id]['status_message'] = 'Export completed successfully!'
+            export_tasks[task_id]['file_path'] = file_path
+
+        except Exception as e:
+            import traceback
+            logger.error(f"Export failed: {str(e)}")
+            logger.error(traceback.format_exc())
+            export_tasks[task_id]['status'] = 'failed'
+            export_tasks[task_id]['error'] = str(e)
+            export_tasks[task_id]['status_message'] = f'Export failed: {str(e)}'
+
+    thread = threading.Thread(target=run_export)
+    thread.start()
+
+    return jsonify({'task_id': task_id})
+
+@app.route('/api/export/status/<task_id>')
+def api_export_status(task_id):
+    """Get export task status"""
+    task = export_tasks.get(task_id)
+
+    if not task:
+        return jsonify({'error': 'Task not found'}), 404
+
+    return jsonify(task)
+
+@app.route('/api/export/download/<task_id>')
+def api_export_download(task_id):
+    """Download exported file"""
+    from flask import send_file
+    import os
+
+    task = export_tasks.get(task_id)
+
+    if not task:
+        return jsonify({'error': 'Task not found'}), 404
+
+    if task['status'] != 'completed':
+        return jsonify({'error': 'Export not completed'}), 400
+
+    file_path = task['file_path']
+    if not file_path or not os.path.exists(file_path):
+        return jsonify({'error': 'File not found'}), 404
+
+    # Get filename for download
+    filename = os.path.basename(file_path)
+
+    return send_file(
+        file_path,
+        as_attachment=True,
+        download_name=filename,
+        mimetype='application/octet-stream'
+    )
+
 @app.route('/logout')
 def logout():
     """Logout and clear tokens"""
@@ -290,4 +437,12 @@ with app.app_context():
     db_manager.setup_default_instruments()
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    import sys
+    # Disable auto-reload for exports directory
+    extra_files = None
+    if '--reload' not in sys.argv:
+        # Run without auto-reload in production mode
+        app.run(debug=False, host='127.0.0.1', port=5000)
+    else:
+        # Development mode with auto-reload (exclude exports directory)
+        app.run(debug=True, use_reloader=False)  # Disable reloader to prevent clearing export_tasks
