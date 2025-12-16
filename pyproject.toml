@@ -1,0 +1,23 @@
+[project]
+name = "expirytrack"
+version = "1.0.0"
+description = "ExpiryTrack Web Interface - Flask Application for tracking options expiry data"
+requires-python = ">=3.10"
+dependencies = [
+    "anyio>=3.7.1",
+    "flask>=3.0.0",
+    "flask-session>=0.5.0",
+    "flask-sqlalchemy>=3.1.1",
+    "httpx>=0.28.1",
+    "loguru>=0.7.0",
+    "pandas>=2.3.2",
+    "python-dotenv>=1.0.0",
+    "requests>=2.31.0",
+    "sqlalchemy>=2.0.43",
+    "tqdm>=4.65.0",
+    "cryptography>=46.0.1",
+    "openpyxl>=3.1.5",
+]
+
+[project.scripts]
+expirytrack = "app:app"
