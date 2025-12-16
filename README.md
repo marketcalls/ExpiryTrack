@@ -58,9 +58,28 @@ git clone https://github.com/marketcalls/ExpiryTrack.git
 cd ExpiryTrack
 ```
 
-#### 2. Create Virtual Environment (Recommended)
+#### 2. Choose Your Installation Method
+
+##### Option A: Using uv (Recommended)
+
+[uv](https://docs.astral.sh/uv/) is a fast Python package manager that handles virtual environments automatically.
 
 ```bash
+# Install uv if not already installed
+# macOS/Linux
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Windows
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+
+# Run the application (uv handles everything automatically)
+uv run app.py
+```
+
+##### Option B: Using pip (Traditional)
+
+```bash
+# Create virtual environment
 # Windows
 python -m venv venv
 venv\Scripts\activate
@@ -68,19 +87,20 @@ venv\Scripts\activate
 # Linux/Mac
 python3 -m venv venv
 source venv/bin/activate
-```
 
-#### 3. Install Dependencies
-
-```bash
+# Install dependencies
 pip install -r requirements.txt
 ```
 
 Note: This installs all dependencies including `openpyxl` for Excel export functionality.
 
-#### 4. Run the Application
+#### 3. Run the Application
 
 ```bash
+# If using uv
+uv run app.py
+
+# If using pip/venv
 python app.py
 ```
 
