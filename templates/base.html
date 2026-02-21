@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="light">
+<html lang="en" id="html-root" data-theme="light">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -8,6 +8,15 @@
     <!-- TailwindCSS & DaisyUI -->
     <link href="https://cdn.jsdelivr.net/npm/daisyui@4.4.24/dist/full.min.css" rel="stylesheet" type="text/css" />
     <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- Apply theme before paint to prevent FOUC -->
+    <script>
+        (function() {
+            var theme = localStorage.getItem('theme') || 'light';
+            document.documentElement.setAttribute('data-theme', theme);
+            if (theme === 'dark') document.documentElement.classList.add('dark-mode');
+        })();
+    </script>
 
     <!-- Custom Styles - Supabase Inspired -->
     <style>
@@ -87,6 +96,126 @@
             background: #ecfdf5;
             color: #059669;
         }
+
+        /* ── Dark Mode Overrides ── */
+        [data-theme="dark"] body {
+            background-color: #1a1a2e;
+            color: #e2e8f0;
+        }
+
+        [data-theme="dark"] .navbar-supabase {
+            background: #16213e;
+            border-bottom-color: #2d3748;
+        }
+
+        [data-theme="dark"] .nav-link {
+            color: #cbd5e0;
+        }
+
+        [data-theme="dark"] .nav-link:hover {
+            background: #2d3748;
+            color: #3ecf8e;
+        }
+
+        [data-theme="dark"] .nav-link.active {
+            background: #1a3a2a;
+            color: #3ecf8e;
+        }
+
+        [data-theme="dark"] .card-minimal {
+            background: #16213e;
+            border-color: #2d3748;
+            box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.3);
+        }
+
+        [data-theme="dark"] .card-minimal:hover {
+            box-shadow: 0 4px 12px 0 rgba(0, 0, 0, 0.4);
+            border-color: #3ecf8e;
+        }
+
+        [data-theme="dark"] .btn-supabase {
+            background: #3ecf8e;
+            color: #1a1a2e;
+        }
+
+        [data-theme="dark"] .btn-supabase:hover {
+            background: #2bb77a;
+        }
+
+        [data-theme="dark"] .supabase-text-gradient {
+            background: linear-gradient(135deg, #3ecf8e 0%, #6ee7b7 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        [data-theme="dark"] footer {
+            background: #16213e !important;
+            border-color: #2d3748 !important;
+        }
+
+        [data-theme="dark"] footer a,
+        [data-theme="dark"] footer p,
+        [data-theme="dark"] footer .text-gray-600,
+        [data-theme="dark"] footer .text-gray-500 {
+            color: #a0aec0 !important;
+        }
+
+        [data-theme="dark"] footer .card-minimal {
+            background: #1a2744 !important;
+            border-color: #2d3748 !important;
+        }
+
+        /* Dark mode text color fixes */
+        [data-theme="dark"] .text-gray-900,
+        [data-theme="dark"] .text-gray-800,
+        [data-theme="dark"] .text-gray-700 {
+            color: #e2e8f0 !important;
+        }
+
+        [data-theme="dark"] .text-gray-600,
+        [data-theme="dark"] .text-gray-500 {
+            color: #a0aec0 !important;
+        }
+
+        [data-theme="dark"] .text-gray-400 {
+            color: #718096 !important;
+        }
+
+        [data-theme="dark"] .bg-gray-50,
+        [data-theme="dark"] .bg-gray-100 {
+            background-color: #1a2744 !important;
+        }
+
+        [data-theme="dark"] .border-gray-200,
+        [data-theme="dark"] .border-gray-300 {
+            border-color: #2d3748 !important;
+        }
+
+        [data-theme="dark"] .hover\:bg-gray-50:hover {
+            background-color: #1a2744 !important;
+        }
+
+        [data-theme="dark"] input,
+        [data-theme="dark"] select,
+        [data-theme="dark"] textarea {
+            background-color: #1a2744 !important;
+            border-color: #2d3748 !important;
+            color: #e2e8f0 !important;
+        }
+
+        /* Toast container styles */
+        #toast-container .toast-item {
+            animation: slideIn 0.3s ease-out;
+        }
+        @keyframes slideIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+        @keyframes slideOut {
+            from { transform: translateX(0); opacity: 1; }
+            to { transform: translateX(100%); opacity: 0; }
+        }
     </style>
 </head>
 <body class="min-h-screen" style="background-color: #fafafa;">
@@ -116,17 +245,61 @@
                         Help
                     </a>
                     {% if is_authenticated %}
+                    <a href="{{ url_for('analytics_page') }}" class="nav-link">
+                        Analytics
+                    </a>
+                    <a href="{{ url_for('download_status_page') }}" class="nav-link">
+                        Download Status
+                    </a>
                     <a href="{{ url_for('status_page') }}" class="nav-link">
                         Status
                     </a>
+
+                    <!-- Token Expiry Badge (#7) -->
+                    <span id="token-badge" class="badge badge-sm badge-success cursor-pointer hidden" title="Token status">Token: --</span>
+
+                    <!-- Collection Progress Badge (#8) -->
+                    <div id="collection-status" class="dropdown dropdown-end hidden">
+                        <div tabindex="0" role="button" class="btn btn-ghost btn-sm gap-1">
+                            <span class="loading loading-spinner loading-xs text-success"></span>
+                            <span id="collection-badge-text" class="text-xs font-medium">0%</span>
+                        </div>
+                        <div tabindex="0" class="dropdown-content z-[51] card card-compact w-72 p-2 shadow-lg bg-base-100 border border-base-300">
+                            <div class="card-body p-3">
+                                <h3 class="font-semibold text-sm">Collection Progress</h3>
+                                <div class="w-full bg-gray-200 rounded-full h-2 mt-1">
+                                    <div id="collection-badge-bar" class="bg-green-500 h-2 rounded-full transition-all" style="width: 0%"></div>
+                                </div>
+                                <div class="flex justify-between text-xs mt-1">
+                                    <span id="collection-badge-candles">0 candles</span>
+                                    <span id="collection-badge-action" class="truncate ml-2 text-right">Idle</span>
+                                </div>
+                                <a href="{{ url_for('status_page') }}" class="btn btn-xs btn-outline btn-success mt-2">View Status</a>
+                            </div>
+                        </div>
+                    </div>
+
                     <a href="{{ url_for('logout') }}" class="nav-link text-red-600 hover:bg-red-50 hover:text-red-700 font-medium">
                         Logout
                     </a>
                     {% endif %}
+
+                    <!-- Dark Mode Toggle (#5) -->
+                    <button onclick="toggleTheme()" class="btn btn-ghost btn-sm btn-circle" title="Toggle dark mode">
+                        <svg id="theme-icon-light" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/>
+                        </svg>
+                        <svg id="theme-icon-dark" class="w-5 h-5 hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"/>
+                        </svg>
+                    </button>
                 </div>
             </div>
         </div>
     </nav>
+
+    <!-- Toast Container (#6) -->
+    <div id="toast-container" class="fixed top-20 right-4 z-[100] flex flex-col gap-2 max-w-sm"></div>
 
     <!-- Flash Messages -->
     {% with messages = get_flashed_messages(with_categories=true) %}
@@ -139,7 +312,7 @@
                                 {{ message }}
                             </span>
                             <button onclick="this.parentElement.parentElement.remove()" class="text-gray-400 hover:text-gray-600 text-lg font-bold">
-                                ×
+                                &times;
                             </button>
                         </div>
                     </div>
@@ -175,12 +348,162 @@
                 </div>
 
                 <div class="text-sm text-gray-600">
-                    <p>Copyright © 2025 - <a href="https://marketcalls.in" target="_blank" class="text-green-600 hover:text-green-700 font-medium">Marketcalls</a></p>
+                    <p>Copyright &copy; 2025 - <a href="https://marketcalls.in" target="_blank" class="text-green-600 hover:text-green-700 font-medium">Marketcalls</a></p>
                     <p class="text-xs text-gray-500 mt-1">Open source software built by the community, for the community</p>
                 </div>
             </div>
         </div>
     </footer>
+
+    <!-- Theme Toggle Script (#5) -->
+    <script>
+    function toggleTheme() {
+        var html = document.getElementById('html-root');
+        var current = html.getAttribute('data-theme');
+        var next = current === 'dark' ? 'light' : 'dark';
+        html.setAttribute('data-theme', next);
+        localStorage.setItem('theme', next);
+        updateThemeIcons(next);
+        if (next === 'dark') {
+            html.classList.add('dark-mode');
+            document.body.style.backgroundColor = '#1a1a2e';
+        } else {
+            html.classList.remove('dark-mode');
+            document.body.style.backgroundColor = '#fafafa';
+        }
+    }
+
+    function updateThemeIcons(theme) {
+        var lightIcon = document.getElementById('theme-icon-light');
+        var darkIcon = document.getElementById('theme-icon-dark');
+        if (theme === 'dark') {
+            lightIcon.classList.add('hidden');
+            darkIcon.classList.remove('hidden');
+        } else {
+            lightIcon.classList.remove('hidden');
+            darkIcon.classList.add('hidden');
+        }
+    }
+
+    // Apply on load
+    (function() {
+        var theme = localStorage.getItem('theme') || 'light';
+        updateThemeIcons(theme);
+        if (theme === 'dark') {
+            document.body.style.backgroundColor = '#1a1a2e';
+        }
+    })();
+    </script>
+
+    <!-- Toast Notification System (#6) -->
+    <script>
+    function showToast(message, type, duration) {
+        type = type || 'info';
+        duration = duration || 5000;
+        var container = document.getElementById('toast-container');
+        var alertClass = {
+            success: 'alert-success',
+            error: 'alert-error',
+            warning: 'alert-warning',
+            info: 'alert-info'
+        }[type] || 'alert-info';
+
+        var toast = document.createElement('div');
+        toast.className = 'toast-item alert ' + alertClass + ' shadow-lg text-sm py-2 px-4 flex items-center justify-between gap-2';
+        toast.innerHTML = '<span>' + escapeHtml(message) + '</span>' +
+            '<button onclick="this.parentElement.style.animation=\'slideOut 0.3s ease-in forwards\';setTimeout(function(){this.parentElement.remove()}.bind(this),300)" class="btn btn-ghost btn-xs">&times;</button>';
+        container.appendChild(toast);
+
+        setTimeout(function() {
+            if (toast.parentElement) {
+                toast.style.animation = 'slideOut 0.3s ease-in forwards';
+                setTimeout(function() { toast.remove(); }, 300);
+            }
+        }, duration);
+    }
+
+    function escapeHtml(text) {
+        var div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+    </script>
+
+    <!-- Token Expiry Polling (#7) -->
+    {% if is_authenticated %}
+    <script>
+    (function() {
+        var tokenWarned = {};
+        function checkTokenStatus() {
+            fetch('/api/auth/token-status')
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    var badge = document.getElementById('token-badge');
+                    if (!badge) return;
+                    if (!data.valid) {
+                        badge.textContent = 'Token: Expired';
+                        badge.className = 'badge badge-sm badge-error cursor-pointer';
+                        badge.classList.remove('hidden');
+                        return;
+                    }
+                    badge.classList.remove('hidden');
+                    var secs = data.remaining_seconds || 0;
+                    var hrs = Math.floor(secs / 3600);
+                    var mins = Math.floor((secs % 3600) / 60);
+                    badge.textContent = 'Token: ' + hrs + 'h ' + mins + 'm';
+                    if (secs > 7200) {
+                        badge.className = 'badge badge-sm badge-success cursor-pointer';
+                    } else if (secs > 3600) {
+                        badge.className = 'badge badge-sm badge-warning cursor-pointer';
+                    } else {
+                        badge.className = 'badge badge-sm badge-error cursor-pointer';
+                    }
+                    // Toast warnings at thresholds
+                    [1800, 900, 300].forEach(function(threshold) {
+                        if (secs <= threshold && secs > threshold - 65 && !tokenWarned[threshold]) {
+                            tokenWarned[threshold] = true;
+                            var label = threshold >= 60 ? Math.floor(threshold/60) + ' minutes' : threshold + ' seconds';
+                            showToast('Token expires in ' + label + '. Re-authenticate soon.', 'warning', 8000);
+                        }
+                    });
+                })
+                .catch(function() {});
+        }
+        checkTokenStatus();
+        setInterval(checkTokenStatus, 60000);
+    })();
+    </script>
+
+    <!-- Collection Progress Polling (#8) -->
+    <script>
+    (function() {
+        function checkCollectionStatus() {
+            fetch('/api/collect/tasks')
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    var wrapper = document.getElementById('collection-status');
+                    if (!wrapper) return;
+                    var tasks = (data.tasks || []).filter(function(t) {
+                        return t.status === 'running' || t.status === 'pending';
+                    });
+                    if (tasks.length === 0) {
+                        wrapper.classList.add('hidden');
+                        return;
+                    }
+                    wrapper.classList.remove('hidden');
+                    var task = tasks[0];
+                    document.getElementById('collection-badge-text').textContent = (task.progress || 0) + '%';
+                    document.getElementById('collection-badge-bar').style.width = (task.progress || 0) + '%';
+                    document.getElementById('collection-badge-candles').textContent = ((task.stats && task.stats.candles) || 0).toLocaleString() + ' candles';
+                    document.getElementById('collection-badge-action').textContent = task.current_action || 'Processing...';
+                })
+                .catch(function() {});
+        }
+        checkCollectionStatus();
+        setInterval(checkCollectionStatus, 5000);
+    })();
+    </script>
+    {% endif %}
 
     {% block scripts %}{% endblock %}
 </body>

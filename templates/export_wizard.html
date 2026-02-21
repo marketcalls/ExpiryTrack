@@ -270,14 +270,14 @@ function nextStep() {
         // Validate instrument selection
         selectedInstruments = Array.from(document.querySelectorAll('.instrument-checkbox:checked')).map(cb => cb.value);
         if (selectedInstruments.length === 0) {
-            alert('Please select at least one instrument');
+            showToast('Please select at least one instrument', 'warning');
             return;
         }
     } else if (currentStep === 2) {
         // Validate expiry selection
         const checkedExpiries = document.querySelectorAll('.expiry-checkbox:checked');
         if (checkedExpiries.length === 0) {
-            alert('Please select at least one expiry date');
+            showToast('Please select at least one expiry date', 'warning');
             return;
         }
         // Store selected expiries

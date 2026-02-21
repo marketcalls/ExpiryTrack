@@ -1,0 +1,401 @@
+{% extends "base.html" %}
+
+{% block title %}Download Status - ExpiryTrack{% endblock %}
+
+{% block content %}
+<div class="max-w-7xl mx-auto">
+    <div class="flex items-center justify-between mb-8">
+        <h1 class="text-3xl font-bold supabase-text-gradient">Download Status</h1>
+        <div class="flex items-center space-x-3">
+            <button onclick="retryFailedContracts()" id="btn-retry-failed" class="btn btn-sm btn-outline btn-warning hidden">
+                Retry Failed
+            </button>
+            <button onclick="resumeAllIncomplete()" id="btn-resume-all" class="btn-supabase text-sm hidden">
+                Resume All Incomplete
+            </button>
+            <button onclick="loadData()" class="btn-supabase text-sm">Refresh</button>
+        </div>
+    </div>
+
+    <!-- Filters -->
+    <div class="card-minimal p-4 mb-6">
+        <div class="flex flex-wrap items-center gap-4">
+            <div>
+                <label class="text-sm text-gray-500 font-medium block mb-1">Instrument</label>
+                <select id="filter-instrument" onchange="loadData()" class="select select-bordered select-sm w-48">
+                    <option value="">All Instruments</option>
+                </select>
+            </div>
+            <div>
+                <label class="text-sm text-gray-500 font-medium block mb-1">Status</label>
+                <select id="filter-status" onchange="applyFilters()" class="select select-bordered select-sm w-40">
+                    <option value="">All</option>
+                    <option value="complete">Complete</option>
+                    <option value="partial">Partial</option>
+                    <option value="not_started">Not Started</option>
+                </select>
+            </div>
+        </div>
+    </div>
+
+    <!-- Summary Cards -->
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+        <div class="card-minimal p-4 text-center">
+            <div id="s-total" class="text-2xl font-bold text-gray-800">-</div>
+            <div class="text-xs text-gray-500">Total Expiries</div>
+        </div>
+        <div class="card-minimal p-4 text-center">
+            <div id="s-complete" class="text-2xl font-bold text-green-600">-</div>
+            <div class="text-xs text-gray-500">Complete</div>
+        </div>
+        <div class="card-minimal p-4 text-center">
+            <div id="s-partial" class="text-2xl font-bold text-yellow-600">-</div>
+            <div class="text-xs text-gray-500">Partial</div>
+        </div>
+        <div class="card-minimal p-4 text-center">
+            <div id="s-not-started" class="text-2xl font-bold text-red-600">-</div>
+            <div class="text-xs text-gray-500">Not Started</div>
+        </div>
+    </div>
+
+    <!-- Data Table -->
+    <div class="card-minimal overflow-hidden">
+        <div class="overflow-x-auto">
+            <table class="table table-sm w-full">
+                <thead>
+                    <tr class="bg-gray-50 text-gray-600 text-xs uppercase tracking-wider">
+                        <th class="font-semibold">Instrument</th>
+                        <th class="font-semibold">Expiry Date</th>
+                        <th class="font-semibold text-right">Total</th>
+                        <th class="font-semibold text-right">Fetched</th>
+                        <th class="font-semibold text-right">Missing</th>
+                        <th class="font-semibold">Coverage</th>
+                        <th class="font-semibold text-center">Status</th>
+                        <th class="font-semibold text-center">Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="status-tbody">
+                    <tr>
+                        <td colspan="8" class="text-center py-8 text-gray-400">Loading...</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Missing Contracts Modal -->
+<dialog id="missing-modal" class="modal">
+    <div class="modal-box max-w-2xl">
+        <form method="dialog">
+            <button class="btn btn-sm btn-circle btn-ghost absolute right-2 top-2">X</button>
+        </form>
+        <h3 class="font-bold text-lg mb-1" id="modal-title">Missing Contracts</h3>
+        <p class="text-sm text-gray-500 mb-4" id="modal-subtitle"></p>
+        <div id="modal-body" class="max-h-96 overflow-y-auto">
+            <p class="text-gray-400 text-center py-4">Loading...</p>
+        </div>
+    </div>
+    <form method="dialog" class="modal-backdrop">
+        <button>close</button>
+    </form>
+</dialog>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let allData = [];
+
+function fmt(n) {
+    if (n == null) return '-';
+    return n.toLocaleString();
+}
+
+// ── Load instruments for filter dropdown ──
+function populateInstrumentFilter(data) {
+    const sel = document.getElementById('filter-instrument');
+    const seen = new Set();
+    // preserve current selection
+    const current = sel.value;
+    // remove old dynamic options
+    while (sel.options.length > 1) sel.remove(1);
+    data.forEach(r => {
+        if (!seen.has(r.instrument_key)) {
+            seen.add(r.instrument_key);
+            const opt = document.createElement('option');
+            opt.value = r.instrument_key;
+            opt.textContent = r.instrument_name;
+            sel.appendChild(opt);
+        }
+    });
+    // restore selection if still valid
+    if (current) sel.value = current;
+}
+
+// ── Load data from API ──
+async function loadData() {
+    const instrument = document.getElementById('filter-instrument').value;
+    const url = instrument ? `/api/download-status?instrument=${encodeURIComponent(instrument)}` : '/api/download-status';
+
+    try {
+        const res = await fetch(url);
+        if (res.status === 401) { window.location.href = '/login'; return; }
+        allData = await res.json();
+        populateInstrumentFilter(allData);
+        applyFilters();
+    } catch (e) {
+        console.error('Failed to load download status:', e);
+        document.getElementById('status-tbody').innerHTML =
+            '<tr><td colspan="8" class="text-center py-8 text-red-500">Failed to load data</td></tr>';
+    }
+}
+
+// ── Apply client-side status filter ──
+function applyFilters() {
+    const statusFilter = document.getElementById('filter-status').value;
+    const filtered = statusFilter ? allData.filter(r => r.status === statusFilter) : allData;
+
+    updateSummary(filtered);
+    renderTable(filtered);
+    updateResumeAllButton(filtered);
+}
+
+// ── Update summary cards ──
+function updateSummary(data) {
+    const complete = data.filter(r => r.status === 'complete').length;
+    const partial = data.filter(r => r.status === 'partial').length;
+    const notStarted = data.filter(r => r.status === 'not_started').length;
+
+    document.getElementById('s-total').textContent = fmt(data.length);
+    document.getElementById('s-complete').textContent = fmt(complete);
+    document.getElementById('s-partial').textContent = fmt(partial);
+    document.getElementById('s-not-started').textContent = fmt(notStarted);
+}
+
+// ── Show/hide Resume All button ──
+function updateResumeAllButton(data) {
+    const btn = document.getElementById('btn-resume-all');
+    const hasIncomplete = data.some(r => r.status !== 'complete');
+    btn.classList.toggle('hidden', !hasIncomplete);
+}
+
+// ── Render table rows ──
+function renderTable(data) {
+    const tbody = document.getElementById('status-tbody');
+
+    if (data.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="8" class="text-center py-8 text-gray-400">No data found</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = data.map(r => {
+        const badgeClass = r.status === 'complete' ? 'badge-success'
+            : r.status === 'partial' ? 'badge-warning'
+            : 'badge-error';
+        const badgeLabel = r.status === 'complete' ? 'Complete'
+            : r.status === 'partial' ? 'Partial'
+            : 'Not Started';
+
+        const barColor = r.status === 'complete' ? 'bg-green-500'
+            : r.status === 'partial' ? 'bg-yellow-500'
+            : 'bg-red-400';
+
+        const noDataInfo = r.no_data_contracts > 0
+            ? `<span class="text-xs text-gray-400 ml-1" title="${r.no_data_contracts} contracts had no data on Upstox">(${r.no_data_contracts} no-data)</span>`
+            : '';
+
+        const actions = r.status === 'complete'
+            ? `<div class="flex items-center gap-2 justify-center">
+                <button onclick="forceRefetch('${escAttr(r.instrument_key)}', '${r.expiry_date}', '${escAttr(r.instrument_name)}')"
+                    class="btn btn-xs btn-ghost text-orange-500" title="Reset all contracts to re-download">Re-fetch</button>
+               </div>`
+            : `<div class="flex items-center gap-2 justify-center">
+                <button onclick="viewMissing('${escAttr(r.instrument_key)}', '${r.expiry_date}', '${escAttr(r.instrument_name)}')"
+                    class="btn btn-xs btn-ghost text-blue-600">View Missing</button>
+                <button onclick="resumeOne('${escAttr(r.instrument_name)}', '${r.expiry_date}')"
+                    class="btn btn-xs btn-outline btn-success">Resume</button>
+               </div>`;
+
+        return `<tr class="hover:bg-gray-50">
+            <td class="font-medium">${esc(r.instrument_name)}</td>
+            <td>${r.expiry_date}</td>
+            <td class="text-right">${fmt(r.total_contracts)}</td>
+            <td class="text-right text-green-600">${fmt(r.fetched_contracts)}${noDataInfo}</td>
+            <td class="text-right text-red-600">${fmt(r.missing_contracts)}</td>
+            <td>
+                <div class="flex items-center gap-2">
+                    <div class="w-20 bg-gray-200 rounded-full h-2">
+                        <div class="${barColor} h-2 rounded-full" style="width: ${r.pct}%"></div>
+                    </div>
+                    <span class="text-xs text-gray-600">${r.pct}%</span>
+                </div>
+            </td>
+            <td class="text-center"><span class="badge badge-sm ${badgeClass}">${badgeLabel}</span></td>
+            <td class="text-center">${actions}</td>
+        </tr>`;
+    }).join('');
+}
+
+// ── Escape helpers ──
+function esc(s) {
+    const d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+}
+function escAttr(s) {
+    return s.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+}
+
+// ── View Missing Contracts ──
+async function viewMissing(instrumentKey, expiryDate, instrumentName) {
+    const modal = document.getElementById('missing-modal');
+    document.getElementById('modal-title').textContent = `Missing Contracts`;
+    document.getElementById('modal-subtitle').textContent = `${instrumentName} — ${expiryDate}`;
+    document.getElementById('modal-body').innerHTML = '<p class="text-gray-400 text-center py-4">Loading...</p>';
+    modal.showModal();
+
+    try {
+        const res = await fetch(`/api/download-status/${encodeURIComponent(instrumentKey)}/${expiryDate}/missing`);
+        const contracts = await res.json();
+
+        if (contracts.length === 0) {
+            document.getElementById('modal-body').innerHTML = '<p class="text-gray-400 text-center py-4">No missing contracts</p>';
+            return;
+        }
+
+        let html = `<table class="table table-xs w-full">
+            <thead><tr class="text-xs text-gray-500 uppercase">
+                <th>Symbol</th><th>Type</th><th class="text-right">Strike</th>
+            </tr></thead><tbody>`;
+
+        contracts.forEach(c => {
+            html += `<tr>
+                <td class="font-mono text-xs">${esc(c.trading_symbol)}</td>
+                <td><span class="badge badge-xs ${c.contract_type === 'CE' ? 'badge-info' : c.contract_type === 'PE' ? 'badge-warning' : 'badge-ghost'}">${esc(c.contract_type)}</span></td>
+                <td class="text-right">${c.strike_price != null ? c.strike_price.toLocaleString() : '-'}</td>
+            </tr>`;
+        });
+
+        html += '</tbody></table>';
+        html += `<p class="text-xs text-gray-400 mt-2">${contracts.length} missing contract(s)</p>`;
+        document.getElementById('modal-body').innerHTML = html;
+    } catch (e) {
+        document.getElementById('modal-body').innerHTML = `<p class="text-red-500 text-center py-4">Error: ${e.message}</p>`;
+    }
+}
+
+// ── Force re-fetch (reset and re-download) ──
+async function forceRefetch(instrumentKey, expiryDate, instrumentName) {
+    if (!confirm(`Force re-fetch ALL contracts for ${instrumentName} — ${expiryDate}?\n\nThis will reset all contracts and re-download candle data from Upstox.`)) return;
+
+    try {
+        const res = await fetch('/api/download-status/force-refetch', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ instrument_key: instrumentKey, expiry_date: expiryDate })
+        });
+        if (res.status === 401) { window.location.href = '/'; return; }
+        const data = await res.json();
+        if (data.success) {
+            showToast(`Reset ${data.reset_count} contracts. Now use "Resume" to re-download them.`, 'success');
+            loadData();  // Refresh the table
+        } else {
+            showToast('Failed: ' + (data.error || 'Unknown error'), 'error');
+        }
+    } catch (e) {
+        showToast('Error: ' + e.message, 'error');
+    }
+}
+
+// ── Resume single expiry ──
+async function resumeOne(instrumentName, expiryDate) {
+    if (!confirm(`Resume downloading ${instrumentName} — ${expiryDate}?`)) return;
+
+    try {
+        const res = await fetch('/api/download-status/resume', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ instrument: instrumentName, expiries: [expiryDate] })
+        });
+        const data = await res.json();
+        if (data.success) {
+            showToast(`Collection task started (ID: ${data.task_id.slice(0,8)}...). Check the Status page for progress.`, 'success');
+        } else {
+            showToast('Failed to start: ' + (data.error || 'Unknown error'), 'error');
+        }
+    } catch (e) {
+        showToast('Error: ' + e.message, 'error');
+    }
+}
+
+// ── Resume all incomplete ──
+async function resumeAllIncomplete() {
+    const instrument = document.getElementById('filter-instrument').value;
+    const incomplete = allData.filter(r => r.status !== 'complete');
+
+    if (incomplete.length === 0) {
+        showToast('No incomplete expiries to resume.', 'info');
+        return;
+    }
+
+    // Group by instrument name
+    const grouped = {};
+    incomplete.forEach(r => {
+        // If instrument filter is set, only include matching
+        if (instrument && r.instrument_key !== instrument) return;
+        if (!grouped[r.instrument_name]) grouped[r.instrument_name] = [];
+        grouped[r.instrument_name].push(r.expiry_date);
+    });
+
+    const totalExpiries = Object.values(grouped).reduce((s, arr) => s + arr.length, 0);
+    if (totalExpiries === 0) {
+        showToast('No incomplete expiries to resume.', 'info');
+        return;
+    }
+
+    if (!confirm(`Resume downloading ${totalExpiries} incomplete expiries across ${Object.keys(grouped).length} instrument(s)?`)) return;
+
+    try {
+        const taskIds = [];
+        for (const [instName, expiries] of Object.entries(grouped)) {
+            const res = await fetch('/api/download-status/resume', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ instrument: instName, expiries })
+            });
+            const data = await res.json();
+            if (data.success) taskIds.push(data.task_id.slice(0,8));
+        }
+        showToast(`Started ${taskIds.length} collection task(s). Check the Status page for progress.`, 'success');
+    } catch (e) {
+        showToast('Error: ' + e.message, 'error');
+    }
+}
+
+// ── Retry failed contracts ──
+async function retryFailedContracts() {
+    const instrument = document.getElementById('filter-instrument').value;
+    if (!confirm('Retry all failed contracts' + (instrument ? ' for this instrument' : '') + '? This will reset fetch attempts and re-download.')) return;
+
+    try {
+        const res = await fetch('/api/download-status/retry-failed', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ instrument_key: instrument || null })
+        });
+        const data = await res.json();
+        if (data.success) {
+            showToast(`Reset ${data.reset_count} failed contracts. Starting re-download...`, 'success');
+            loadData();
+        } else {
+            showToast('Failed: ' + (data.error || 'Unknown error'), 'error');
+        }
+    } catch (e) {
+        showToast('Error: ' + e.message, 'error');
+    }
+}
+
+// Init
+document.addEventListener('DOMContentLoaded', loadData);
+</script>
+{% endblock %}

@@ -47,6 +47,28 @@
             </div>
         </div>
 
+        <!-- Scheduler -->
+        <div class="card-minimal mb-8">
+            <div class="p-8">
+                <div class="flex items-center justify-between mb-6">
+                    <h2 class="text-2xl font-semibold">Scheduler</h2>
+                    <div id="scheduler-controls" class="flex items-center gap-3">
+                        <span id="scheduler-badge" class="inline-flex px-2 py-1 text-xs font-medium rounded-full bg-gray-100 text-gray-800">Loading...</span>
+                        <button id="scheduler-toggle" onclick="toggleScheduler()" class="text-sm px-3 py-1 rounded-lg border border-gray-300 hover:bg-gray-100">...</button>
+                    </div>
+                </div>
+
+                <div id="scheduler-jobs" class="space-y-2 text-sm text-gray-600">
+                    <div class="text-center text-gray-400">Loading scheduler status...</div>
+                </div>
+
+                <div id="scheduler-history" class="mt-4 hidden">
+                    <h4 class="text-sm font-semibold text-gray-700 mb-2">Recent History</h4>
+                    <div id="scheduler-history-list" class="text-xs font-mono space-y-1 max-h-32 overflow-y-auto"></div>
+                </div>
+            </div>
+        </div>
+
         <!-- Recent Collection Tasks -->
         <div class="card-minimal">
             <div class="p-8">
@@ -205,8 +227,82 @@
     {% if tasks %}
     const hasRunningTasks = {{ tasks|selectattr('status', 'equalto', 'running')|list|length }} > 0;
     if (hasRunningTasks) {
-        setTimeout(() => location.reload(), 5000); // Refresh every 5 seconds
+        setTimeout(() => location.reload(), 5000);
     }
     {% endif %}
+
+    // ── Scheduler UI ──
+    let schedulerRunning = false;
+
+    async function loadSchedulerStatus() {
+        try {
+            const res = await fetch('/api/scheduler/status');
+            const data = await res.json();
+            schedulerRunning = data.running;
+
+            // Badge
+            const badge = document.getElementById('scheduler-badge');
+            if (data.running) {
+                badge.textContent = 'Running';
+                badge.className = 'inline-flex px-2 py-1 text-xs font-medium rounded-full bg-green-100 text-green-800';
+            } else {
+                badge.textContent = data.enabled ? 'Stopped' : 'Disabled';
+                badge.className = 'inline-flex px-2 py-1 text-xs font-medium rounded-full bg-gray-100 text-gray-800';
+            }
+
+            // Toggle button
+            const btn = document.getElementById('scheduler-toggle');
+            btn.textContent = data.running ? 'Stop' : 'Start';
+
+            // Jobs
+            const jobsDiv = document.getElementById('scheduler-jobs');
+            if (data.jobs && data.jobs.length > 0) {
+                jobsDiv.innerHTML = data.jobs.map(job => `
+                    <div class="flex items-center justify-between p-2 bg-gray-50 rounded">
+                        <div>
+                            <span class="font-medium text-gray-800">${job.name}</span>
+                            <span class="ml-2 text-xs text-gray-500">${job.trigger}</span>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <span class="text-xs text-gray-500">${job.next_run ? 'Next: ' + new Date(job.next_run).toLocaleString() : 'Paused'}</span>
+                            <button onclick="toggleJob('${job.id}', ${!job.paused})" class="text-xs px-2 py-0.5 rounded border ${job.paused ? 'border-green-300 text-green-600' : 'border-yellow-300 text-yellow-600'}">${job.paused ? 'Resume' : 'Pause'}</button>
+                        </div>
+                    </div>
+                `).join('');
+            } else {
+                jobsDiv.innerHTML = '<div class="text-center text-gray-400">No scheduled jobs</div>';
+            }
+
+            // History
+            if (data.recent_history && data.recent_history.length > 0) {
+                document.getElementById('scheduler-history').classList.remove('hidden');
+                document.getElementById('scheduler-history-list').innerHTML = data.recent_history.map(h => {
+                    const color = h.status === 'success' ? 'text-green-600' : h.status === 'error' ? 'text-red-600' : 'text-yellow-600';
+                    return `<div class="${color}">[${h.timestamp.split('T')[1]?.slice(0,8) || ''}] ${h.job_id}: ${h.status}${h.error ? ' - ' + h.error : ''}</div>`;
+                }).join('');
+            }
+        } catch (e) {
+            console.error('Failed to load scheduler status:', e);
+        }
+    }
+
+    async function toggleScheduler() {
+        const action = schedulerRunning ? 'stop' : 'start';
+        await fetch('/api/scheduler/toggle', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({action})
+        });
+        loadSchedulerStatus();
+    }
+
+    async function toggleJob(jobId, pause) {
+        const endpoint = pause ? 'pause' : 'resume';
+        await fetch(`/api/scheduler/jobs/${jobId}/${endpoint}`, {method: 'POST'});
+        loadSchedulerStatus();
+    }
+
+    // Load scheduler status on page load
+    loadSchedulerStatus();
 </script>
 {% endblock %}

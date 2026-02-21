@@ -5,6 +5,7 @@ import os
 import csv
 import json
 import zipfile
+import duckdb
 import pandas as pd
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
@@ -12,6 +13,7 @@ from pathlib import Path
 import logging
 
 from ..database.manager import DatabaseManager
+from ..config import config
 
 logger = logging.getLogger(__name__)
 
@@ -19,28 +21,132 @@ class DataExporter:
     """Export collected data in various formats with OpenAlgo symbol support"""
 
     def __init__(self, db_manager: Optional[DatabaseManager] = None):
-        """Initialize exporter
-
-        Args:
-            db_manager: Database manager instance
-        """
         self.db_manager = db_manager or DatabaseManager()
         self.export_dir = Path("exports")
         self.export_dir.mkdir(exist_ok=True)
 
+    # ── Single JOIN helper (#13) ──────────────────────────────
+    def _fetch_all_data(self, instruments: List[str], expiries: Dict[str, List[str]]) -> pd.DataFrame:
+        """Fetch all data in a single JOIN query instead of N+1 per-contract queries."""
+        pairs = []
+        for instrument in instruments:
+            for exp in expiries.get(instrument, []):
+                pairs.append((instrument, exp))
+
+        if not pairs:
+            return pd.DataFrame()
+
+        conn = duckdb.connect(str(config.DB_PATH))
+        try:
+            where_parts = []
+            params = []
+            for inst, exp in pairs:
+                where_parts.append("(c.instrument_key = ? AND c.expiry_date = ?)")
+                params.append(inst)
+                params.append(exp)
+
+            where_clause = " OR ".join(where_parts)
+
+            df = conn.execute(f"""
+                SELECT
+                    c.openalgo_symbol,
+                    c.instrument_key,
+                    c.expiry_date,
+                    c.strike_price,
+                    c.contract_type,
+                    c.trading_symbol,
+                    h.timestamp,
+                    h.open,
+                    h.high,
+                    h.low,
+                    h.close,
+                    h.volume,
+                    h.oi
+                FROM historical_data h
+                JOIN contracts c ON h.expired_instrument_key = c.expired_instrument_key
+                WHERE {where_clause}
+                ORDER BY c.instrument_key, c.expiry_date, c.strike_price, h.timestamp
+            """, params).fetchdf()
+
+            return df
+        finally:
+            conn.close()
+
+    def _add_datetime_columns(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Add date and time columns derived from timestamp."""
+        if df.empty:
+            return df
+        ts = pd.to_datetime(df['timestamp'])
+        df = df.copy()
+        df['date'] = ts.dt.strftime('%Y-%m-%d')
+        df['time'] = ts.dt.strftime('%H:%M:%S')
+        return df
+
+    def _apply_time_range_df(self, df: pd.DataFrame, time_range: str) -> pd.DataFrame:
+        """Apply time range filter on DataFrame."""
+        if df.empty or time_range == 'all' or not time_range:
+            return df
+
+        days_map = {'1d': 1, '7d': 7, '30d': 30, '90d': 90}
+        days = days_map.get(time_range)
+        if not days:
+            return df
+
+        ts = pd.to_datetime(df['timestamp'])
+        # Per-row: filter based on each row's expiry_date
+        expiry_dt = pd.to_datetime(df['expiry_date'])
+        cutoff = expiry_dt - pd.Timedelta(days=days)
+        mask = ts >= cutoff
+        return df[mask]
+
+    def _build_filename(self, instruments: List[str], suffix: str, options: Dict) -> str:
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        if instruments:
+            instrument_names = [inst.split('|')[1].replace(' ', '_') for inst in instruments]
+            instrument_label = '_'.join(instrument_names[:3])
+            if len(instruments) > 3:
+                instrument_label += f'_and_{len(instruments) - 3}_more'
+        else:
+            instrument_label = 'NoInstruments'
+        base = f"ExpiryTrack_{instrument_label}_{timestamp}"
+        if options.get('include_openalgo', True):
+            base = f"OpenAlgo_{base}"
+        return f"{base}.{suffix}"
+
+    def _format_df_for_csv(self, df: pd.DataFrame, options: Dict) -> pd.DataFrame:
+        """Format DataFrame columns for CSV/ZIP output."""
+        if df.empty:
+            return df
+
+        out = pd.DataFrame()
+
+        if options.get('include_openalgo', True) and 'openalgo_symbol' in df.columns:
+            out['openalgo_symbol'] = df['openalgo_symbol']
+
+        out['date'] = df['date']
+        out['time'] = df['time']
+
+        if options.get('include_metadata', True):
+            out['instrument'] = df['instrument_key'].apply(lambda x: x.split('|')[1].replace(' ', '_') if '|' in str(x) else x)
+            out['expiry'] = df['expiry_date'].astype(str)
+            out['strike'] = df['strike_price']
+            out['option_type'] = df['contract_type']
+            out['trading_symbol'] = df['trading_symbol']
+
+        out['timestamp'] = df['timestamp']
+        out['open'] = df['open']
+        out['high'] = df['high']
+        out['low'] = df['low']
+        out['close'] = df['close']
+        out['volume'] = df['volume']
+        out['oi'] = df['oi'].fillna(0).astype(int)
+
+        return out
+
     def get_openalgo_formatted_symbol(self, contract: Dict) -> str:
-        """Convert contract to OpenAlgo symbol format
-
-        Args:
-            contract: Contract dictionary
-
-        Returns:
-            OpenAlgo formatted symbol (e.g., NIFTY25JAN25C24000)
-        """
+        """Convert contract to OpenAlgo symbol format"""
         try:
             symbol = contract.get('trading_symbol', '')
-
-            # Parse the symbol
             if 'NIFTY' in symbol:
                 if 'BANKNIFTY' in symbol:
                     base = 'BANKNIFTY'
@@ -51,16 +157,13 @@ class DataExporter:
             else:
                 base = symbol.split(' ')[0]
 
-            # Extract expiry date
             expiry = contract.get('expiry_date', '')
             if expiry:
                 expiry_date = datetime.strptime(expiry, '%Y-%m-%d')
-                # Format: DDMMMYY (e.g., 25JAN25)
                 expiry_str = expiry_date.strftime('%d%b%y').upper()
             else:
                 expiry_str = ''
 
-            # Extract option type and strike
             if ' CE ' in symbol or symbol.endswith(' CE'):
                 option_type = 'C'
                 strike = symbol.split(' CE')[0].split(' ')[-1]
@@ -68,151 +171,52 @@ class DataExporter:
                 option_type = 'P'
                 strike = symbol.split(' PE')[0].split(' ')[-1]
             else:
-                # Futures
                 option_type = 'F'
                 strike = ''
 
-            # Construct OpenAlgo symbol
             if option_type == 'F':
-                openalgo_symbol = f"{base}{expiry_str}FUT"
+                return f"{base}{expiry_str}FUT"
             else:
-                openalgo_symbol = f"{base}{expiry_str}{option_type}{strike}"
-
-            return openalgo_symbol
-
+                return f"{base}{expiry_str}{option_type}{strike}"
         except Exception as e:
             logger.error(f"Error formatting OpenAlgo symbol: {e}")
             return contract.get('trading_symbol', 'UNKNOWN')
 
-    def export_to_csv(self,
-                     instruments: List[str],
-                     expiries: Dict[str, List[str]],
-                     options: Dict,
-                     task_id: str) -> str:
-        """Export data to CSV format
+    # ── CSV Export (rewritten with single query #13) ──────────
+    def export_to_csv(self, instruments: List[str], expiries: Dict[str, List[str]],
+                      options: Dict, task_id: str) -> str:
+        df = self._fetch_all_data(instruments, expiries)
 
-        Args:
-            instruments: List of instrument keys
-            expiries: Dictionary of instrument to expiry dates
-            options: Export options
-            task_id: Task ID for tracking
+        # Apply time range filter
+        if options.get('time_range') != 'all':
+            df = self._apply_time_range_df(df, options.get('time_range'))
 
-        Returns:
-            Path to exported file
-        """
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        df = self._add_datetime_columns(df)
+        df = self._format_df_for_csv(df, options)
 
-        all_data = []
-
-        for instrument in instruments:
-            instrument_expiries = expiries.get(instrument, [])
-            instrument_name = instrument.split('|')[1].replace(' ', '_')
-
-            logger.debug(f"Processing instrument: {instrument}, expiries: {instrument_expiries}")
-
-            for expiry_date in instrument_expiries:
-                # Get contracts for this expiry
-                contracts = self.db_manager.get_contracts_for_expiry(instrument, expiry_date)
-
-                for contract in contracts:
-                    # Get historical data for contract
-                    expired_instrument_key = contract.get('expired_instrument_key', '')
-                    historical_data = self.db_manager.get_historical_data(expired_instrument_key)
-
-                    # Apply time range filter
-                    if options.get('time_range') != 'all':
-                        historical_data = self._filter_by_time_range(
-                            historical_data,
-                            expiry_date,
-                            options.get('time_range')
-                        )
-
-                    # Process each candle
-                    for candle in historical_data:
-                        row = {}
-
-                        # Add OpenAlgo symbol as first column if requested
-                        if options.get('include_openalgo', True):
-                            row['openalgo_symbol'] = self.get_openalgo_formatted_symbol(contract)
-
-                        # Add contract metadata
-                        if options.get('include_metadata', True):
-                            row['instrument'] = instrument_name
-                            row['expiry'] = expiry_date
-                            row['strike'] = contract.get('strike_price', '')
-                            row['option_type'] = contract.get('contract_type', '')
-                            row['trading_symbol'] = contract.get('trading_symbol', '')
-
-                        # Add timestamp as separate date and time columns
-                        timestamp_ms = candle[0]
-                        # Handle both string and numeric timestamps
-                        if isinstance(timestamp_ms, str):
-                            # Parse ISO format timestamp
-                            dt = datetime.fromisoformat(timestamp_ms.replace('+05:30', '+0530').replace('Z', '+0000'))
-                        else:
-                            # Convert from milliseconds
-                            dt = datetime.fromtimestamp(timestamp_ms / 1000)
-                        row['date'] = dt.strftime('%Y-%m-%d')
-                        row['time'] = dt.strftime('%H:%M:%S')
-                        row['timestamp'] = candle[0]
-
-                        # Add OHLCV data
-                        row['open'] = candle[1]
-                        row['high'] = candle[2]
-                        row['low'] = candle[3]
-                        row['close'] = candle[4]
-                        row['volume'] = candle[5]
-                        row['oi'] = candle[6] if len(candle) > 6 else 0
-
-                        all_data.append(row)
-
-        # Create filename with OpenAlgo symbol format
-        base_filename = f"ExpiryTrack_{instrument_name}_{timestamp}"
-        if options.get('include_openalgo', True):
-            base_filename = f"OpenAlgo_{base_filename}"
-
-        filename = f"{base_filename}.csv"
+        filename = self._build_filename(instruments, 'csv', options)
         filepath = self.export_dir / filename
 
-        # Write to CSV
-        if all_data:
-            df = pd.DataFrame(all_data)
-
-            # Ensure proper column order with OpenAlgo symbol, date, time first
-            if 'openalgo_symbol' in df.columns:
-                preferred_order = ['openalgo_symbol', 'date', 'time', 'instrument', 'expiry', 'strike', 'option_type', 'trading_symbol', 'timestamp', 'open', 'high', 'low', 'close', 'volume', 'oi']
-                cols = [col for col in preferred_order if col in df.columns]
-                remaining_cols = [col for col in df.columns if col not in cols]
-                df = df[cols + remaining_cols]
-
-            df.to_csv(filepath, index=False)
-            logger.info(f"Exported {len(all_data)} rows to {filepath}")
-        else:
-            # Create empty file with headers
+        if df.empty:
             headers = ['openalgo_symbol'] if options.get('include_openalgo') else []
             headers.extend(['date', 'time', 'timestamp', 'open', 'high', 'low', 'close', 'volume', 'oi'])
             pd.DataFrame(columns=headers).to_csv(filepath, index=False)
-            logger.warning(f"No data found for export. Created empty file with headers: {filepath}")
+            logger.warning(f"No data found for export. Created empty file: {filepath}")
+        else:
+            df.to_csv(filepath, index=False)
+            logger.info(f"Exported {len(df)} rows to {filepath}")
 
         return str(filepath)
 
-    def export_to_json(self,
-                      instruments: List[str],
-                      expiries: Dict[str, List[str]],
-                      options: Dict,
-                      task_id: str) -> str:
-        """Export data to JSON format
+    # ── JSON Export (rewritten with single query #13) ─────────
+    def export_to_json(self, instruments: List[str], expiries: Dict[str, List[str]],
+                       options: Dict, task_id: str) -> str:
+        df = self._fetch_all_data(instruments, expiries)
 
-        Args:
-            instruments: List of instrument keys
-            expiries: Dictionary of instrument to expiry dates
-            options: Export options
-            task_id: Task ID for tracking
+        if options.get('time_range') != 'all':
+            df = self._apply_time_range_df(df, options.get('time_range'))
 
-        Returns:
-            Path to exported file
-        """
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        df = self._add_datetime_columns(df)
 
         export_data = {
             'metadata': {
@@ -224,261 +228,174 @@ class DataExporter:
             'data': {}
         }
 
-        for instrument in instruments:
-            instrument_expiries = expiries.get(instrument, [])
-            instrument_name = instrument.split('|')[1].replace(' ', '_')
+        if not df.empty:
+            for instrument in instruments:
+                instrument_name = instrument.split('|')[1].replace(' ', '_')
+                export_data['data'][instrument_name] = {}
 
-            export_data['data'][instrument_name] = {}
+                inst_df = df[df['instrument_key'] == instrument]
+                for expiry_date in sorted(inst_df['expiry_date'].astype(str).unique()):
+                    exp_df = inst_df[inst_df['expiry_date'].astype(str) == expiry_date]
+                    contracts_list = []
 
-            for expiry_date in instrument_expiries:
-                contracts = self.db_manager.get_contracts_for_expiry(instrument, expiry_date)
+                    for (ts, ct, sp), group in exp_df.groupby(['trading_symbol', 'contract_type', 'strike_price']):
+                        contract_data = {
+                            'openalgo_symbol': group['openalgo_symbol'].iloc[0] if 'openalgo_symbol' in group.columns else '',
+                            'trading_symbol': ts,
+                            'strike': sp,
+                            'option_type': ct,
+                            'historical_data': []
+                        }
+                        for _, row in group.iterrows():
+                            contract_data['historical_data'].append({
+                                'date': row['date'],
+                                'time': row['time'],
+                                'timestamp': str(row['timestamp']),
+                                'open': float(row['open']),
+                                'high': float(row['high']),
+                                'low': float(row['low']),
+                                'close': float(row['close']),
+                                'volume': int(row['volume']),
+                                'oi': int(row['oi']) if pd.notna(row['oi']) else 0
+                            })
+                        contracts_list.append(contract_data)
 
-                export_data['data'][instrument_name][expiry_date] = []
+                    export_data['data'][instrument_name][expiry_date] = contracts_list
 
-                for contract in contracts:
-                    contract_data = {
-                        'openalgo_symbol': self.get_openalgo_formatted_symbol(contract),
-                        'trading_symbol': contract.get('trading_symbol', ''),
-                        'strike': contract.get('strike_price', ''),
-                        'option_type': contract.get('contract_type', ''),
-                        'historical_data': []
-                    }
-
-                    # Get historical data
-                    expired_instrument_key = contract.get('expired_instrument_key', '')
-                    historical_data = self.db_manager.get_historical_data(expired_instrument_key)
-
-                    # Apply time range filter
-                    if options.get('time_range') != 'all':
-                        historical_data = self._filter_by_time_range(
-                            historical_data,
-                            expiry_date,
-                            options.get('time_range')
-                        )
-
-                    # Format candles
-                    for candle in historical_data:
-                        timestamp_ms = candle[0]
-                        # Handle both string and numeric timestamps
-                        if isinstance(timestamp_ms, str):
-                            # Parse ISO format timestamp
-                            dt = datetime.fromisoformat(timestamp_ms.replace('+05:30', '+0530').replace('Z', '+0000'))
-                        else:
-                            # Convert from milliseconds
-                            dt = datetime.fromtimestamp(timestamp_ms / 1000)
-                        contract_data['historical_data'].append({
-                            'date': dt.strftime('%Y-%m-%d'),
-                            'time': dt.strftime('%H:%M:%S'),
-                            'timestamp': candle[0],
-                            'open': candle[1],
-                            'high': candle[2],
-                            'low': candle[3],
-                            'close': candle[4],
-                            'volume': candle[5],
-                            'oi': candle[6] if len(candle) > 6 else 0
-                        })
-
-                    export_data['data'][instrument_name][expiry_date].append(contract_data)
-
-        # Create filename
-        base_filename = f"ExpiryTrack_{timestamp}"
-        if options.get('include_openalgo', True):
-            base_filename = f"OpenAlgo_{base_filename}"
-
-        filename = f"{base_filename}.json"
+        filename = self._build_filename(instruments, 'json', options)
         filepath = self.export_dir / filename
 
-        # Write JSON
         with open(filepath, 'w') as f:
-            json.dump(export_data, f, indent=2)
+            json.dump(export_data, f, indent=2, default=str)
 
         logger.info(f"Exported data to {filepath}")
         return str(filepath)
 
-    def export_to_zip(self,
-                     instruments: List[str],
-                     expiries: Dict[str, List[str]],
-                     options: Dict,
-                     task_id: str) -> str:
-        """Export data to ZIP archive with separate files
+    # ── ZIP Export (rewritten with single query #13) ──────────
+    def export_to_zip(self, instruments: List[str], expiries: Dict[str, List[str]],
+                      options: Dict, task_id: str) -> str:
+        df = self._fetch_all_data(instruments, expiries)
 
-        Args:
-            instruments: List of instrument keys
-            expiries: Dictionary of instrument to expiry dates
-            options: Export options
-            task_id: Task ID for tracking
+        if options.get('time_range') != 'all':
+            df = self._apply_time_range_df(df, options.get('time_range'))
 
-        Returns:
-            Path to exported file
-        """
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        df = self._add_datetime_columns(df)
 
-        # Create ZIP filename
-        base_filename = f"ExpiryTrack_{timestamp}"
-        if options.get('include_openalgo', True):
-            base_filename = f"OpenAlgo_{base_filename}"
-
-        zip_filename = f"{base_filename}.zip"
-        zip_filepath = self.export_dir / zip_filename
+        filename = self._build_filename(instruments, 'zip', options)
+        zip_filepath = self.export_dir / filename
 
         with zipfile.ZipFile(zip_filepath, 'w', zipfile.ZIP_DEFLATED) as zipf:
-            for instrument in instruments:
-                instrument_expiries = expiries.get(instrument, [])
-                instrument_name = instrument.split('|')[1].replace(' ', '_')
+            if df.empty:
+                zipf.writestr('empty.txt', 'No data found for the selected parameters.')
+            else:
+                for instrument in instruments:
+                    instrument_name = instrument.split('|')[1].replace(' ', '_')
+                    inst_df = df[df['instrument_key'] == instrument]
 
-                for expiry_date in instrument_expiries:
-                    contracts = self.db_manager.get_contracts_for_expiry(instrument, expiry_date)
+                    for expiry_date in sorted(inst_df['expiry_date'].astype(str).unique()):
+                        exp_df = inst_df[inst_df['expiry_date'].astype(str) == expiry_date]
 
-                    # Group by option type if requested
-                    if options.get('separate_files', False):
-                        ce_data = []
-                        pe_data = []
-                        fut_data = []
-
-                        for contract in contracts:
-                            contract_type = contract.get('contract_type', '')
-                            data = self._prepare_contract_data(contract, expiry_date, options)
-
-                            if 'CE' in contract_type:
-                                ce_data.extend(data)
-                            elif 'PE' in contract_type:
-                                pe_data.extend(data)
-                            else:
-                                fut_data.extend(data)
-
-                        # Write separate files
-                        if ce_data:
-                            ce_filename = f"{instrument_name}_{expiry_date}_CE.csv"
-                            self._write_csv_to_zip(zipf, ce_filename, ce_data, options)
-
-                        if pe_data:
-                            pe_filename = f"{instrument_name}_{expiry_date}_PE.csv"
-                            self._write_csv_to_zip(zipf, pe_filename, pe_data, options)
-
-                        if fut_data:
-                            fut_filename = f"{instrument_name}_{expiry_date}_FUT.csv"
-                            self._write_csv_to_zip(zipf, fut_filename, fut_data, options)
-                    else:
-                        # Single file per expiry
-                        all_data = []
-                        for contract in contracts:
-                            data = self._prepare_contract_data(contract, expiry_date, options)
-                            all_data.extend(data)
-
-                        if all_data:
-                            filename = f"{instrument_name}_{expiry_date}.csv"
-                            self._write_csv_to_zip(zipf, filename, all_data, options)
+                        if options.get('separate_files', False):
+                            for ctype, label in [('CE', 'CE'), ('PE', 'PE'), ('FUT', 'FUT')]:
+                                if ctype == 'FUT':
+                                    type_df = exp_df[~exp_df['contract_type'].isin(['CE', 'PE'])]
+                                else:
+                                    type_df = exp_df[exp_df['contract_type'] == ctype]
+                                if not type_df.empty:
+                                    formatted = self._format_df_for_csv(type_df, options)
+                                    csv_name = f"{instrument_name}_{expiry_date}_{label}.csv"
+                                    zipf.writestr(csv_name, formatted.to_csv(index=False))
+                        else:
+                            if not exp_df.empty:
+                                formatted = self._format_df_for_csv(exp_df, options)
+                                csv_name = f"{instrument_name}_{expiry_date}.csv"
+                                zipf.writestr(csv_name, formatted.to_csv(index=False))
 
         logger.info(f"Created ZIP archive: {zip_filepath}")
         return str(zip_filepath)
 
-    def _prepare_contract_data(self, contract: Dict, expiry_date: str, options: Dict) -> List[Dict]:
-        """Prepare contract data for export"""
-        data = []
-        expired_instrument_key = contract.get('expired_instrument_key', '')
-        historical_data = self.db_manager.get_historical_data(expired_instrument_key)
+    # ── Parquet Export (already optimized — unchanged) ────────
+    def export_to_parquet(self, instruments: List[str], expiries: Dict[str, List[str]],
+                          options: Dict, task_id: str) -> str:
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
 
-        # Apply time range filter
-        if options.get('time_range') != 'all':
-            historical_data = self._filter_by_time_range(
-                historical_data,
-                expiry_date,
-                options.get('time_range')
-            )
-
-        for candle in historical_data:
-            row = {}
-
-            if options.get('include_openalgo', True):
-                row['openalgo_symbol'] = self.get_openalgo_formatted_symbol(contract)
-
-            if options.get('include_metadata', True):
-                row['strike'] = contract.get('strike_price', '')
-                row['option_type'] = contract.get('contract_type', '')
-                row['trading_symbol'] = contract.get('trading_symbol', '')
-
-            # Add timestamp as separate date and time columns
-            timestamp_ms = candle[0]
-            # Handle both string and numeric timestamps
-            if isinstance(timestamp_ms, str):
-                # Parse ISO format timestamp
-                dt = datetime.fromisoformat(timestamp_ms.replace('+05:30', '+0530').replace('Z', '+0000'))
-            else:
-                # Convert from milliseconds
-                dt = datetime.fromtimestamp(timestamp_ms / 1000)
-            row['date'] = dt.strftime('%Y-%m-%d')
-            row['time'] = dt.strftime('%H:%M:%S')
-            row['timestamp'] = candle[0]
-            row['open'] = candle[1]
-            row['high'] = candle[2]
-            row['low'] = candle[3]
-            row['close'] = candle[4]
-            row['volume'] = candle[5]
-            row['oi'] = candle[6] if len(candle) > 6 else 0
-
-            data.append(row)
-
-        return data
-
-    def _write_csv_to_zip(self, zipf: zipfile.ZipFile, filename: str, data: List[Dict], options: Dict):
-        """Write CSV data to ZIP file"""
-        if not data:
-            return
-
-        df = pd.DataFrame(data)
-
-        # Ensure proper column order with OpenAlgo symbol, date, time first
-        if 'openalgo_symbol' in df.columns:
-            preferred_order = ['openalgo_symbol', 'date', 'time', 'strike', 'option_type', 'trading_symbol', 'timestamp', 'open', 'high', 'low', 'close', 'volume', 'oi']
-            cols = [col for col in preferred_order if col in df.columns]
-            remaining_cols = [col for col in df.columns if col not in cols]
-            df = df[cols + remaining_cols]
-
-        csv_content = df.to_csv(index=False)
-        zipf.writestr(filename, csv_content)
-
-    def _filter_by_time_range(self, data: List, expiry_date: str, time_range: str) -> List:
-        """Filter historical data by time range"""
-        if not data or time_range == 'all':
-            return data
-
-        expiry_dt = datetime.strptime(expiry_date, '%Y-%m-%d')
-
-        # Calculate cutoff date
-        if time_range == '1d':
-            cutoff_dt = expiry_dt - timedelta(days=1)
-        elif time_range == '7d':
-            cutoff_dt = expiry_dt - timedelta(days=7)
-        elif time_range == '30d':
-            cutoff_dt = expiry_dt - timedelta(days=30)
-        elif time_range == '90d':
-            cutoff_dt = expiry_dt - timedelta(days=90)
+        if instruments:
+            instrument_names = [inst.split('|')[1].replace(' ', '_') for inst in instruments]
+            instrument_label = '_'.join(instrument_names[:3])
+            if len(instruments) > 3:
+                instrument_label += f'_and_{len(instruments) - 3}_more'
         else:
-            return data
+            instrument_label = 'NoInstruments'
+        base_filename = f"ExpiryTrack_{instrument_label}_{timestamp}"
+        if options.get('include_openalgo', True):
+            base_filename = f"OpenAlgo_{base_filename}"
 
-        cutoff_timestamp = int(cutoff_dt.timestamp() * 1000)
+        filename = f"{base_filename}.parquet"
+        filepath = self.export_dir / filename
 
-        # Filter data
-        filtered_data = [
-            candle for candle in data
-            if candle[0] >= cutoff_timestamp
-        ]
+        pairs = []
+        for instrument in instruments:
+            for exp in expiries.get(instrument, []):
+                pairs.append((instrument, exp))
 
-        return filtered_data
+        if not pairs:
+            empty_df = pd.DataFrame(columns=[
+                'openalgo_symbol', 'instrument', 'expiry', 'strike', 'option_type',
+                'trading_symbol', 'timestamp', 'open', 'high', 'low', 'close', 'volume', 'oi'
+            ])
+            empty_df.to_parquet(str(filepath), index=False)
+            logger.warning(f"No data found for export. Created empty Parquet: {filepath}")
+            return str(filepath)
+
+        conn = duckdb.connect(str(config.DB_PATH))
+        try:
+            where_parts = []
+            params = []
+            for inst, exp in pairs:
+                where_parts.append("(c.instrument_key = ? AND c.expiry_date = ?)")
+                params.append(inst)
+                params.append(exp)
+
+            where_clause = " OR ".join(where_parts)
+
+            query = f"""
+                SELECT
+                    c.openalgo_symbol,
+                    c.instrument_key AS instrument,
+                    c.expiry_date AS expiry,
+                    c.strike_price AS strike,
+                    c.contract_type AS option_type,
+                    c.trading_symbol,
+                    h.timestamp,
+                    h.open,
+                    h.high,
+                    h.low,
+                    h.close,
+                    h.volume,
+                    h.oi
+                FROM historical_data h
+                JOIN contracts c ON h.expired_instrument_key = c.expired_instrument_key
+                WHERE {where_clause}
+                ORDER BY c.instrument_key, c.expiry_date, c.strike_price, h.timestamp
+            """
+
+            safe_filepath = str(filepath).replace("'", "''")
+            conn.execute(f"""
+                COPY ({query}) TO '{safe_filepath}' (FORMAT PARQUET, COMPRESSION ZSTD)
+            """, params)
+
+            row_count = conn.execute(
+                f"SELECT COUNT(*) FROM read_parquet('{safe_filepath}')"
+            ).fetchone()[0]
+            logger.info(f"Exported {row_count:,} rows to Parquet: {filepath}")
+        finally:
+            conn.close()
+
+        return str(filepath)
 
     def get_available_expiries(self, instruments: List[str]) -> Dict[str, List[str]]:
-        """Get available expiries for given instruments
-
-        Args:
-            instruments: List of instrument keys
-
-        Returns:
-            Dictionary of instrument to expiry dates
-        """
         result = {}
-
         for instrument in instruments:
             expiries = self.db_manager.get_expiries_for_instrument(instrument)
-            result[instrument] = sorted(expiries, reverse=True)  # Most recent first
-
+            result[instrument] = sorted(expiries, reverse=True)
         return result

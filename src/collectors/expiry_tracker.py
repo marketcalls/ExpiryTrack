@@ -116,6 +116,8 @@ class ExpiryTracker:
         if all_contracts:
             self.db_manager.insert_contracts(all_contracts)
             self.stats['contracts_fetched'] += len(all_contracts)
+            # Mark this expiry's contracts as fetched
+            self.db_manager.mark_expiry_contracts_fetched(instrument, expiry_date)
 
         return contracts
 

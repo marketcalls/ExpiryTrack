@@ -42,30 +42,8 @@
                 <h2 class="text-xl font-semibold mb-6">Step 1: Select Instruments</h2>
                 <p class="text-gray-600 mb-6">Choose the instruments you want to collect expired contract data for:</p>
 
-                <div class="space-y-4">
-                    <div class="flex items-center p-4 border border-gray-200 rounded-lg hover:border-green-300 cursor-pointer">
-                        <input type="checkbox" id="nifty" name="instruments" value="NSE_INDEX|Nifty 50" class="mr-4">
-                        <label for="nifty" class="cursor-pointer flex-1">
-                            <div class="font-medium text-gray-900">NIFTY 50</div>
-                            <div class="text-sm text-gray-600">NSE Index - India's benchmark stock market index</div>
-                        </label>
-                    </div>
-
-                    <div class="flex items-center p-4 border border-gray-200 rounded-lg hover:border-green-300 cursor-pointer">
-                        <input type="checkbox" id="banknifty" name="instruments" value="NSE_INDEX|Nifty Bank" class="mr-4">
-                        <label for="banknifty" class="cursor-pointer flex-1">
-                            <div class="font-medium text-gray-900">BANK NIFTY</div>
-                            <div class="text-sm text-gray-600">NSE Index - Banking sector index</div>
-                        </label>
-                    </div>
-
-                    <div class="flex items-center p-4 border border-gray-200 rounded-lg hover:border-green-300 cursor-pointer">
-                        <input type="checkbox" id="sensex" name="instruments" value="BSE_INDEX|SENSEX" class="mr-4">
-                        <label for="sensex" class="cursor-pointer flex-1">
-                            <div class="font-medium text-gray-900">SENSEX</div>
-                            <div class="text-sm text-gray-600">BSE Index - Bombay Stock Exchange benchmark</div>
-                        </label>
-                    </div>
+                <div id="instruments-container" class="space-y-4">
+                    <div class="text-center text-gray-400 py-4">Loading instruments...</div>
                 </div>
 
                 <div class="flex justify-between items-center mt-8">
@@ -217,6 +195,12 @@
                             </div>
                         </div>
 
+                        <!-- Per-Instrument Progress -->
+                        <div id="instrument-progress-section" class="mb-4 hidden">
+                            <div class="text-sm text-gray-600 mb-2">Per-Instrument Progress:</div>
+                            <div id="instrument-progress-bars" class="space-y-2"></div>
+                        </div>
+
                         <!-- Current Action -->
                         <div class="mb-4">
                             <div class="text-sm text-gray-600 mb-1">Current Action:</div>
@@ -293,19 +277,46 @@ let progressInterval = null;
 
 // Initialize
 document.addEventListener('DOMContentLoaded', function() {
-    updateInstrumentSelection();
+    loadInstrumentsForWizard();
     setupWorkerSlider();
 });
+
+// Load instruments from API (#9)
+async function loadInstrumentsForWizard() {
+    try {
+        const res = await fetch('/api/instruments');
+        const data = await res.json();
+        const container = document.getElementById('instruments-container');
+        const instruments = (data.instruments || []).filter(i => i.is_active);
+        if (instruments.length === 0) {
+            container.innerHTML = '<div class="text-center text-gray-400 py-4">No active instruments. Add some in Settings.</div>';
+            return;
+        }
+        container.innerHTML = instruments.map((inst, idx) => `
+            <div class="flex items-center p-4 border border-gray-200 rounded-lg hover:border-green-300 cursor-pointer">
+                <input type="checkbox" id="inst_${idx}" name="instruments" value="${inst.instrument_key}" class="mr-4">
+                <label for="inst_${idx}" class="cursor-pointer flex-1">
+                    <div class="font-medium text-gray-900">${inst.symbol}</div>
+                    <div class="text-sm text-gray-600">${inst.instrument_key}</div>
+                </label>
+            </div>
+        `).join('');
+        updateInstrumentSelection();
+    } catch (e) {
+        document.getElementById('instruments-container').innerHTML =
+            '<div class="text-red-500 text-center py-4">Failed to load instruments</div>';
+    }
+}
 
 // Step Navigation
 function nextStep(step) {
     if (step === 1 && selectedInstruments.length === 0) {
-        alert('Please select at least one instrument');
+        showToast('Please select at least one instrument', 'warning');
         return;
     }
 
     if (step === 3 && Object.keys(selectedExpiries).length === 0) {
-        alert('Please select at least one expiry date');
+        showToast('Please select at least one expiry date', 'warning');
         return;
     }
 
@@ -477,6 +488,16 @@ function setupWorkerSlider() {
 
 // Start Collection
 async function startCollection() {
+    // Check token status before starting (#7)
+    try {
+        const tokenRes = await fetch('/api/auth/token-status');
+        const tokenData = await tokenRes.json();
+        if (tokenData.valid && tokenData.remaining_seconds < 3600) {
+            var mins = Math.floor(tokenData.remaining_seconds / 60);
+            if (!confirm(`Token expires in ${mins} minutes. Collection may fail if token expires mid-way. Continue anyway?`)) return;
+        }
+    } catch (e) { /* ignore check failure, proceed */ }
+
     const interval = document.getElementById('interval').value;
     const workers = parseInt(document.getElementById('workers').value);
 
@@ -502,10 +523,10 @@ async function startCollection() {
             showInlineProgress();
             startProgressTracking();
         } else {
-            alert('Failed to start collection: ' + data.error);
+            showToast('Failed to start collection: ' + data.error, 'error');
         }
     } catch (error) {
-        alert('Error starting collection: ' + error.message);
+        showToast('Error starting collection: ' + error.message, 'error');
     }
 }
 
@@ -538,8 +559,7 @@ async function updateProgress() {
         }
 
         if (data.task_id || data.status) {
-            // Handle direct task object response
-            const task = data.task_id ? data : data;
+            const task = data;
 
             // Update progress bar
             document.getElementById('progress-bar').style.width = `${task.progress}%`;
@@ -550,7 +570,32 @@ async function updateProgress() {
             document.getElementById('stat-candles').textContent = task.stats.candles || 0;
             document.getElementById('stat-errors').textContent = task.stats.errors || 0;
 
-            // Status updates handled in current-action element above
+            // Update current action
+            if (task.current_action) {
+                document.getElementById('current-action').textContent = task.current_action;
+            }
+
+            // Render per-instrument progress
+            if (task.instrument_progress && Object.keys(task.instrument_progress).length > 0) {
+                const section = document.getElementById('instrument-progress-section');
+                section.classList.remove('hidden');
+                const container = document.getElementById('instrument-progress-bars');
+                container.innerHTML = Object.entries(task.instrument_progress).map(([name, ip]) => {
+                    const label = name.split('|')[1] || name;
+                    const statusColor = ip.status === 'completed' ? 'green' :
+                                        ip.status === 'failed' ? 'red' :
+                                        ip.status === 'running' ? 'blue' : 'gray';
+                    return `
+                        <div class="flex items-center gap-3">
+                            <span class="text-sm font-medium w-28 truncate">${label}</span>
+                            <div class="flex-1 bg-gray-200 rounded-full h-2">
+                                <div class="bg-${statusColor}-500 h-2 rounded-full transition-all duration-300" style="width:${ip.progress || 0}%"></div>
+                            </div>
+                            <span class="text-xs text-gray-500 w-24 text-right">${ip.expiries_done || 0}/${ip.expiries_total || 0} expiries</span>
+                        </div>
+                    `;
+                }).join('');
+            }
 
             // Check if completed
             if (task.status === 'completed' || task.status === 'failed') {

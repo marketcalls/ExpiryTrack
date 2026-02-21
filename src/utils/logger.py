@@ -27,7 +27,7 @@ def setup_logging():
         level=config.LOG_LEVEL,
         format="{time:YYYY-MM-DD HH:mm:ss} | {level} | {module}:{function}:{line} - {message}",
         backtrace=True,
-        diagnose=True
+        diagnose=False
     )
 
     # Add console handler with color

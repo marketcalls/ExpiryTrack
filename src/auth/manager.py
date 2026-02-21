@@ -90,15 +90,29 @@ class AuthManager:
         if not self.has_credentials():
             raise ValueError("API credentials not configured. Please set them first.")
 
+        state = secrets.token_urlsafe(32)
+        self._oauth_state = state
+
         params = {
             'client_id': self.api_key,
             'redirect_uri': self.redirect_uri,
             'response_type': 'code',
-            'state': secrets.token_urlsafe(32)
+            'state': state
         }
 
         auth_url = f"https://api.upstox.com/v2/login/authorization/dialog?{urlencode(params)}"
         return auth_url
+
+    def validate_oauth_state(self, state: str) -> bool:
+        """Validate OAuth state parameter against stored state"""
+        expected = getattr(self, '_oauth_state', None)
+        if not expected or not state:
+            return False
+        return secrets.compare_digest(expected, state)
+
+    def clear_oauth_state(self) -> None:
+        """Clear stored OAuth state after validation"""
+        self._oauth_state = None
 
     async def exchange_code_for_token(self, auth_code: str) -> bool:
         """
@@ -222,14 +236,6 @@ class AuthManager:
 
             return "No authorization code received", 400
 
-        @app.route('/shutdown')
-        def shutdown():
-            """Shutdown Flask server"""
-            func = request.environ.get('werkzeug.server.shutdown')
-            if func:
-                func()
-            return "Server shutting down..."
-
         # Get authorization URL
         auth_url = self.get_authorization_url()
         print(f"\nPlease authenticate at: {auth_url}\n")
@@ -239,7 +245,7 @@ class AuthManager:
 
         # Run Flask server
         try:
-            app.run(host='127.0.0.1', port=5000, debug=False)
+            app.run(host=config.HOST, port=config.PORT, debug=False)
         except Exception as e:
             logger.error(f"Failed to start callback server: {e}")
             return False

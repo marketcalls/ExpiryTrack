@@ -40,7 +40,7 @@ def setup():
     api_secret = click.prompt("API Secret", type=str, hide_input=True)
 
     # Optional redirect URI
-    click.echo("\nRedirect URI (press Enter for default: http://127.0.0.1:5000/upstox/callback)")
+    click.echo(f"\nRedirect URI (press Enter for default: {config.UPSTOX_REDIRECT_URI})")
     redirect_uri = click.prompt("Redirect URI", default="", show_default=False)
 
     if not api_key or not api_secret:
@@ -323,7 +323,7 @@ def test():
 
 @cli.command()
 def optimize():
-    """Optimize database (VACUUM for SQLite)"""
+    """Optimize database (CHECKPOINT for DuckDB)"""
     db_manager = DatabaseManager()
     click.echo("Optimizing database...")
     db_manager.vacuum()
@@ -335,6 +335,63 @@ def clear_auth():
     auth_manager = AuthManager()
     auth_manager.clear_tokens()
     click.echo("Authentication tokens cleared!")
+
+@cli.command()
+@click.option('--instrument', default=None, help='Filter to specific instrument key')
+def quality_check(instrument):
+    """Run data quality checks on collected data"""
+    from src.quality.checker import DataQualityChecker
+
+    click.echo("\nRunning data quality checks...")
+    checker = DataQualityChecker()
+    report = checker.run_all_checks(instrument)
+
+    click.echo(f"\nChecks run: {report.checks_run}")
+    click.echo(f"Checks passed: {report.checks_passed}")
+    click.echo(f"Errors: {report.error_count}")
+    click.echo(f"Warnings: {report.warning_count}")
+    click.echo(f"Overall: {'PASSED' if report.passed else 'FAILED'}")
+
+    if report.violations:
+        click.echo(f"\nViolations ({len(report.violations)}):")
+        click.echo("-" * 60)
+        for v in report.violations[:20]:
+            icon = 'E' if v.severity == 'error' else 'W' if v.severity == 'warning' else 'I'
+            click.echo(f"  [{icon}] {v.check}: {v.message}")
+        if len(report.violations) > 20:
+            click.echo(f"  ... and {len(report.violations) - 20} more")
+
+@cli.command()
+@click.option('--enable/--disable', default=True, help='Enable or disable scheduler')
+def scheduler(enable):
+    """Start the background scheduler for automated collection"""
+    import signal
+    import time
+    from src.scheduler.scheduler import scheduler_manager
+
+    if enable:
+        config.SCHEDULER_ENABLED = True
+        scheduler_manager.start()
+
+        click.echo("Scheduler started. Jobs:")
+        for job in scheduler_manager.get_jobs():
+            click.echo(f"  - {job['name']} (next: {job['next_run'] or 'paused'})")
+
+        click.echo("\nPress Ctrl+C to stop...")
+
+        def handle_signal(sig, frame):
+            click.echo("\nStopping scheduler...")
+            scheduler_manager.stop()
+            sys.exit(0)
+
+        signal.signal(signal.SIGINT, handle_signal)
+        signal.signal(signal.SIGTERM, handle_signal)
+
+        while True:
+            time.sleep(1)
+    else:
+        scheduler_manager.stop()
+        click.echo("Scheduler disabled")
 
 if __name__ == '__main__':
     cli()

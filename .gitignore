@@ -170,9 +170,11 @@ data/*.db-shm
 data/*.db-wal
 data/*.sqlite
 data/*.sqlite3
+data/*.duckdb
 *.db
 *.sqlite
 *.sqlite3
+*.duckdb
 
 # Log files
 logs/*.log
@@ -188,6 +190,7 @@ secrets.json
 *.key
 *.pem
 *.crt
+data/.flask_secret_key
 
 # Session files
 flask_session/

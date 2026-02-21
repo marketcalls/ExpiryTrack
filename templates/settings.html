@@ -3,9 +3,9 @@
 {% block title %}Settings - ExpiryTrack{% endblock %}
 
 {% block content %}
-    <div class="max-w-2xl mx-auto">
+    <div class="max-w-2xl mx-auto space-y-6">
         <!-- Plus Plan Requirement Warning -->
-        <div class="card-minimal p-6 mb-6 border-amber-200 bg-amber-50">
+        <div class="card-minimal p-6 border-amber-200 bg-amber-50">
             <div class="flex items-start space-x-3">
                 <div class="flex-shrink-0">
                     <div class="w-6 h-6 bg-amber-500 text-white rounded-full flex items-center justify-center text-sm font-bold">!</div>
@@ -17,19 +17,20 @@
                         The Basic Plan does not provide access to historical data for expired derivatives.
                     </p>
                     <div class="text-xs text-amber-600">
-                        <p>• Currently free to activate (may become chargeable with advance notice)</p>
-                        <p>• Can switch between plans anytime (24-hour cooling period)</p>
-                        <p>• Activate in your Upstox account: Settings → Plans</p>
+                        <p>* Currently free to activate (may become chargeable with advance notice)</p>
+                        <p>* Can switch between plans anytime (24-hour cooling period)</p>
+                        <p>* Activate in your Upstox account: Settings > Plans</p>
                     </div>
                     <a href="https://upstox.com/files/terms-and-condition/plus-pack.pdf"
                        target="_blank"
                        class="inline-block mt-2 text-amber-800 underline text-sm hover:text-amber-900">
-                        View Plus Plan Terms →
+                        View Plus Plan Terms
                     </a>
                 </div>
             </div>
         </div>
 
+        <!-- API Configuration -->
         <div class="card-minimal">
             <div class="p-8">
                 <h2 class="text-2xl font-semibold mb-6">API Configuration</h2>
@@ -109,5 +110,272 @@
                 {% endif %}
             </div>
         </div>
+
+        <!-- Instruments Management (#9) -->
+        <div class="card-minimal">
+            <div class="p-8">
+                <h2 class="text-2xl font-semibold mb-4">Instruments</h2>
+                <p class="text-sm text-gray-500 mb-4">Manage instruments available for data collection.</p>
+
+                <div id="instruments-list" class="space-y-2 mb-4">
+                    <div class="text-center text-gray-400 py-4">Loading...</div>
+                </div>
+
+                <div class="border-t pt-4 mt-4">
+                    <h4 class="text-sm font-medium text-gray-700 mb-3">Add New Instrument</h4>
+                    <div class="flex gap-2">
+                        <input type="text" id="new-inst-key" placeholder="e.g. NSE_INDEX|Nifty 50"
+                               class="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-green-500" />
+                        <input type="text" id="new-inst-symbol" placeholder="Display name"
+                               class="w-36 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-green-500" />
+                        <button onclick="addInstrument()" class="btn-supabase text-sm">Add</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- API Keys (#10) -->
+        {% if is_authenticated %}
+        <div class="card-minimal">
+            <div class="p-8">
+                <h2 class="text-2xl font-semibold mb-4">API Keys</h2>
+                <p class="text-sm text-gray-500 mb-4">Generate API keys for external access to your data via the REST API.</p>
+
+                <div id="api-keys-list" class="space-y-2 mb-4">
+                    <div class="text-center text-gray-400 py-4">Loading...</div>
+                </div>
+
+                <div class="border-t pt-4 mt-4">
+                    <div class="flex gap-2">
+                        <input type="text" id="new-key-name" placeholder="Key name (e.g. My Script)"
+                               class="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-green-500" />
+                        <button onclick="generateApiKey()" class="btn-supabase text-sm">Generate Key</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Backup & Restore (#11) -->
+        <div class="card-minimal">
+            <div class="p-8">
+                <h2 class="text-2xl font-semibold mb-4">Backup & Restore</h2>
+                <p class="text-sm text-gray-500 mb-4">Create database backups and restore from previous snapshots.</p>
+
+                <div class="flex gap-3 mb-4">
+                    <button onclick="createBackup()" class="btn-supabase text-sm" id="btn-create-backup">Create Backup</button>
+                    <label class="btn bg-gray-100 text-gray-700 hover:bg-gray-200 font-medium py-2 px-4 rounded-lg text-sm cursor-pointer">
+                        Restore from File
+                        <input type="file" accept=".zip" onchange="restoreBackup(this)" class="hidden" />
+                    </label>
+                </div>
+
+                <div id="backups-list" class="space-y-2">
+                    <div class="text-center text-gray-400 py-4">Loading...</div>
+                </div>
+            </div>
+        </div>
+        {% endif %}
     </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// ── Instruments (#9) ─────────────────────────────────────
+async function loadInstruments() {
+    try {
+        const res = await fetch('/api/instruments');
+        const data = await res.json();
+        const list = document.getElementById('instruments-list');
+        if (!data.instruments || data.instruments.length === 0) {
+            list.innerHTML = '<div class="text-center text-gray-400 py-4">No instruments configured</div>';
+            return;
+        }
+        list.innerHTML = data.instruments.map(inst => `
+            <div class="flex items-center justify-between p-3 border border-gray-200 rounded-lg">
+                <div>
+                    <span class="font-medium">${escHtml(inst.symbol)}</span>
+                    <span class="text-xs text-gray-500 ml-2">${escHtml(inst.instrument_key)}</span>
+                </div>
+                <div class="flex items-center gap-2">
+                    <label class="cursor-pointer label">
+                        <input type="checkbox" class="toggle toggle-sm toggle-success"
+                               ${inst.is_active ? 'checked' : ''}
+                               onchange="toggleInstrument(${inst.id}, this.checked)" />
+                    </label>
+                    <button onclick="removeInstrument(${inst.id})" class="btn btn-ghost btn-xs text-red-500" title="Remove">&times;</button>
+                </div>
+            </div>
+        `).join('');
+    } catch (e) {
+        document.getElementById('instruments-list').innerHTML = '<div class="text-red-500 text-center py-4">Failed to load</div>';
+    }
+}
+
+async function addInstrument() {
+    const key = document.getElementById('new-inst-key').value.trim();
+    const symbol = document.getElementById('new-inst-symbol').value.trim();
+    if (!key || !symbol) { showToast('Both instrument key and display name are required', 'warning'); return; }
+    try {
+        const res = await fetch('/api/instruments', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ instrument_key: key, symbol: symbol })
+        });
+        const data = await res.json();
+        if (data.success) {
+            showToast('Instrument added', 'success');
+            document.getElementById('new-inst-key').value = '';
+            document.getElementById('new-inst-symbol').value = '';
+            loadInstruments();
+        } else {
+            showToast(data.error || 'Failed to add', 'error');
+        }
+    } catch (e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+async function toggleInstrument(id, active) {
+    await fetch(`/api/instruments/${id}`, {
+        method: 'PATCH',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ is_active: active })
+    });
+}
+
+async function removeInstrument(id) {
+    if (!confirm('Remove this instrument?')) return;
+    await fetch(`/api/instruments/${id}`, { method: 'DELETE' });
+    loadInstruments();
+}
+
+// ── API Keys (#10) ───────────────────────────────────────
+async function loadApiKeys() {
+    try {
+        const res = await fetch('/api/api-keys');
+        const data = await res.json();
+        const list = document.getElementById('api-keys-list');
+        if (!list) return;
+        if (!data.keys || data.keys.length === 0) {
+            list.innerHTML = '<div class="text-center text-gray-400 py-4">No API keys generated</div>';
+            return;
+        }
+        list.innerHTML = data.keys.map(k => `
+            <div class="flex items-center justify-between p-3 border border-gray-200 rounded-lg">
+                <div>
+                    <span class="font-medium text-sm">${escHtml(k.key_name)}</span>
+                    <code class="text-xs text-gray-500 ml-2 bg-gray-100 px-2 py-0.5 rounded">${escHtml(k.api_key_masked)}</code>
+                    <span class="text-xs text-gray-400 ml-2">${k.is_active ? '' : '(revoked)'}</span>
+                </div>
+                <div>
+                    ${k.is_active ? `<button onclick="revokeApiKey(${k.id})" class="btn btn-ghost btn-xs text-red-500">Revoke</button>` : ''}
+                </div>
+            </div>
+        `).join('');
+    } catch (e) {}
+}
+
+async function generateApiKey() {
+    const name = document.getElementById('new-key-name').value.trim() || 'Unnamed Key';
+    try {
+        const res = await fetch('/api/api-keys', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ name: name })
+        });
+        const data = await res.json();
+        if (data.success && data.key) {
+            showToast('API key generated! Copy it now — it won\'t be shown again: ' + data.key.api_key, 'success', 15000);
+            document.getElementById('new-key-name').value = '';
+            loadApiKeys();
+        } else {
+            showToast(data.error || 'Failed', 'error');
+        }
+    } catch (e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+async function revokeApiKey(id) {
+    if (!confirm('Revoke this API key? This cannot be undone.')) return;
+    await fetch(`/api/api-keys/${id}`, { method: 'DELETE' });
+    showToast('API key revoked', 'info');
+    loadApiKeys();
+}
+
+// ── Backup & Restore (#11) ───────────────────────────────
+async function loadBackups() {
+    try {
+        const res = await fetch('/api/backup/list');
+        const data = await res.json();
+        const list = document.getElementById('backups-list');
+        if (!list) return;
+        if (!data.backups || data.backups.length === 0) {
+            list.innerHTML = '<div class="text-center text-gray-400 py-4">No backups found</div>';
+            return;
+        }
+        list.innerHTML = data.backups.map(b => `
+            <div class="flex items-center justify-between p-3 border border-gray-200 rounded-lg">
+                <div>
+                    <span class="font-medium text-sm">${escHtml(b.filename)}</span>
+                    <span class="text-xs text-gray-500 ml-2">${b.size_mb} MB</span>
+                    <span class="text-xs text-gray-400 ml-2">${b.created_at || ''}</span>
+                </div>
+                <div class="flex gap-1">
+                    <a href="/api/backup/download/${encodeURIComponent(b.filename)}" class="btn btn-ghost btn-xs text-blue-600">Download</a>
+                    <button onclick="deleteBackup('${escAttr(b.filename)}')" class="btn btn-ghost btn-xs text-red-500">Delete</button>
+                </div>
+            </div>
+        `).join('');
+    } catch (e) {}
+}
+
+async function createBackup() {
+    const btn = document.getElementById('btn-create-backup');
+    btn.disabled = true; btn.textContent = 'Creating...';
+    try {
+        const res = await fetch('/api/backup/create', { method: 'POST' });
+        const data = await res.json();
+        if (data.success) {
+            showToast('Backup created: ' + data.filename, 'success');
+            loadBackups();
+        } else {
+            showToast(data.error || 'Failed', 'error');
+        }
+    } catch (e) { showToast('Error: ' + e.message, 'error'); }
+    btn.disabled = false; btn.textContent = 'Create Backup';
+}
+
+async function restoreBackup(input) {
+    if (!input.files[0]) return;
+    if (!confirm('Restore from this backup? Current data will be backed up first.')) { input.value = ''; return; }
+    const form = new FormData();
+    form.append('file', input.files[0]);
+    try {
+        const res = await fetch('/api/backup/restore', { method: 'POST', body: form });
+        const data = await res.json();
+        if (data.success) {
+            showToast('Database restored successfully!', 'success');
+            loadBackups();
+        } else {
+            showToast(data.error || 'Restore failed', 'error');
+        }
+    } catch (e) { showToast('Error: ' + e.message, 'error'); }
+    input.value = '';
+}
+
+async function deleteBackup(filename) {
+    if (!confirm('Delete this backup?')) return;
+    await fetch(`/api/backup/delete/${encodeURIComponent(filename)}`, { method: 'DELETE' });
+    showToast('Backup deleted', 'info');
+    loadBackups();
+}
+
+// ── Helpers ──────────────────────────────────────────────
+function escHtml(s) { var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+function escAttr(s) { return s.replace(/'/g, "\\'").replace(/"/g, '&quot;'); }
+
+// Init
+document.addEventListener('DOMContentLoaded', function() {
+    loadInstruments();
+    if (document.getElementById('api-keys-list')) loadApiKeys();
+    if (document.getElementById('backups-list')) loadBackups();
+});
+</script>
 {% endblock %}

@@ -181,7 +181,8 @@ class PriorityRateLimiter(UpstoxRateLimiter):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.priority_queue = asyncio.PriorityQueue()
-        self.processing = False
+        self._processing_lock = asyncio.Lock()
+        self._processing = False
         self._counter = 0
 
     async def acquire_with_priority(self, priority: int = 5) -> None:
@@ -192,23 +193,31 @@ class PriorityRateLimiter(UpstoxRateLimiter):
             priority: Request priority (1=highest, 10=lowest)
         """
         event = asyncio.Event()
-        # Add a unique counter to ensure tuples are always comparable
         counter = self._counter
         self._counter += 1
         await self.priority_queue.put((priority, time.time(), counter, event))
 
-        if not self.processing:
-            asyncio.create_task(self._process_queue())
+        async with self._processing_lock:
+            if not self._processing:
+                self._processing = True
+                asyncio.create_task(self._process_queue())
 
         await event.wait()
 
     async def _process_queue(self) -> None:
         """Process priority queue"""
-        self.processing = True
-
-        while not self.priority_queue.empty():
-            priority, timestamp, counter, event = await self.priority_queue.get()
-            await self.acquire()
-            event.set()
-
-        self.processing = False
+        try:
+            while True:
+                try:
+                    priority, timestamp, counter, event = self.priority_queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    break
+                await self.acquire()
+                event.set()
+        finally:
+            async with self._processing_lock:
+                self._processing = False
+                # Re-check: if items were added during processing, restart
+                if not self.priority_queue.empty():
+                    self._processing = True
+                    asyncio.create_task(self._process_queue())
