@@ -1,16 +1,19 @@
 """
 Database Manager for ExpiryTrack
-Handles DuckDB operations with optimized time-series storage
+Thin facade over domain-specific repository classes.
+Handles DuckDB schema initialization and connection management.
 """
-import json
-import threading
-import duckdb
-import pandas as pd
-from pathlib import Path
-from typing import Dict, List, Optional, Any, Tuple
-from datetime import datetime, date
+
+from __future__ import annotations
+
 import logging
+import threading
+from collections.abc import Generator, Iterator
 from contextlib import contextmanager
+from pathlib import Path
+from typing import Any
+
+import duckdb
 
 from ..config import config
 
@@ -22,11 +25,11 @@ _DEFAULT_REDIRECT_URI = config.UPSTOX_REDIRECT_URI
 class DictCursor:
     """Wrapper around DuckDB cursor that supports dict-like row access via row['column']"""
 
-    def __init__(self, cursor):
+    def __init__(self, cursor: Any) -> None:
         self._cursor = cursor
-        self._description = None
+        self._description: Any = None
 
-    def execute(self, sql, params=None):
+    def execute(self, sql: str, params: Any = None) -> DictCursor:
         if params is not None:
             self._cursor.execute(sql, params)
         else:
@@ -34,12 +37,12 @@ class DictCursor:
         self._description = self._cursor.description
         return self
 
-    def executemany(self, sql, params):
+    def executemany(self, sql: str, params: Any) -> DictCursor:
         self._cursor.executemany(sql, params)
         self._description = self._cursor.description
         return self
 
-    def fetchone(self):
+    def fetchone(self) -> Any:
         row = self._cursor.fetchone()
         if row is None:
             return None
@@ -47,7 +50,7 @@ class DictCursor:
             return DictRow(row, [d[0] for d in self._description])
         return row
 
-    def fetchall(self):
+    def fetchall(self) -> Any:
         rows = self._cursor.fetchall()
         if self._description:
             columns = [d[0] for d in self._description]
@@ -55,87 +58,105 @@ class DictCursor:
         return rows
 
     @property
-    def rowcount(self):
-        return self._cursor.rowcount
+    def rowcount(self) -> int:
+        return self._cursor.rowcount  # type: ignore[no-any-return]
 
     @property
-    def lastrowid(self):
+    def lastrowid(self) -> int | None:
         # DuckDB doesn't have lastrowid natively; we handle this per-query
-        return getattr(self._cursor, 'lastrowid', None)
+        return getattr(self._cursor, "lastrowid", None)
 
     @property
-    def description(self):
+    def description(self) -> Any:
         return self._cursor.description
 
 
 class DictRow:
     """Row object that supports both index-based and key-based access, like sqlite3.Row"""
 
-    def __init__(self, values, columns):
+    def __init__(self, values: tuple[Any, ...], columns: list[str]) -> None:
         self._values = values
         self._columns = columns
-        self._col_map = {col: idx for idx, col in enumerate(columns)}
+        self._col_map: dict[str, int] = {col: idx for idx, col in enumerate(columns)}
 
-    def __getitem__(self, key):
+    def __getitem__(self, key: int | str) -> Any:
         if isinstance(key, int):
             return self._values[key]
         return self._values[self._col_map[key]]
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[Any]:
         return iter(self._values)
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self._values)
 
-    def keys(self):
+    def keys(self) -> list[str]:
         return self._columns
 
-    def __contains__(self, key):
+    def __contains__(self, key: object) -> bool:
         return key in self._col_map
 
-    def items(self):
-        return zip(self._columns, self._values)
+    def items(self) -> zip[tuple[str, Any]]:
+        return zip(self._columns, self._values, strict=False)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"DictRow({dict(self.items())})"
 
 
-def dict_from_row(row):
+def dict_from_row(row: Any) -> Any:
     """Convert a DictRow to a plain dict"""
     if row is None:
         return None
     if isinstance(row, DictRow):
-        return {col: row[col] for col in row.keys()}
+        return {col: row[col] for col in row.keys()}  # noqa: SIM118
     return dict(row)
 
 
 class DatabaseManager:
     """
-    Database manager for time-series expired contract data
+    Database manager facade — delegates domain operations to repository classes.
+    Owns connection management, schema initialization, and cross-cutting queries.
     """
 
     # Class-level lock shared across all instances for DuckDB single-writer serialization
     _write_lock = threading.Lock()
 
-    def __init__(self, db_path: Optional[Path] = None):
-        """
-        Initialize database manager
-
-        Args:
-            db_path: Path to database file
-        """
+    def __init__(self, db_path: Path | None = None):
         self.db_path = db_path or config.DB_PATH
         self.db_type = config.DB_TYPE
 
         # Create database directory if needed
         self.db_path.parent.mkdir(exist_ok=True, parents=True)
 
-        # Initialize database
+        # Initialize database schema
         self._init_database()
 
+        # Compose repository instances
+        from .repos import (
+            CandleRepository,
+            ContractRepository,
+            CredentialRepository,
+            HistoricalDataRepository,
+            InstrumentMasterRepository,
+            InstrumentRepository,
+            JobRepository,
+            TaskRepository,
+            WatchlistRepository,
+        )
+
+        self.credentials = CredentialRepository(self)
+        self.instruments = InstrumentRepository(self)
+        self.contracts = ContractRepository(self)
+        self.historical = HistoricalDataRepository(self)
+        self.instrument_master = InstrumentMasterRepository(self)
+        self.candles = CandleRepository(self)
+        self.watchlists = WatchlistRepository(self)
+        self.jobs = JobRepository(self)
+        self.tasks_repo = TaskRepository(self)
+
     @contextmanager
-    def get_connection(self):
-        """Context manager for database connections.
+    def get_connection(self) -> Generator[Any, None, None]:
+        """Context manager for read-write database connections.
 
         Uses a class-level threading.Lock to serialize writes,
         since DuckDB only supports a single concurrent writer.
@@ -150,111 +171,51 @@ class DatabaseManager:
                 if conn:
                     try:
                         conn.rollback()
-                    except Exception:
-                        pass  # No active transaction to rollback
+                    except duckdb.Error:
+                        logger.debug("No active transaction to rollback")
                 logger.error(f"Database error: {e}")
                 raise
             finally:
                 if conn:
                     conn.close()
 
-    def _table_exists(self, conn, table_name: str) -> bool:
+    @contextmanager
+    def get_read_connection(self) -> Generator[Any, None, None]:
+        """Context manager for read-only database connections.
+
+        No write lock needed — DuckDB allows concurrent reads.
+        Uses same connection config as get_connection() to avoid
+        DuckDB's "different configuration" error when both are open.
+        """
+        conn = None
+        try:
+            conn = duckdb.connect(str(self.db_path))
+            yield conn
+        finally:
+            if conn:
+                conn.close()
+
+    def _table_exists(self, conn: Any, table_name: str) -> bool:
         """Check if a table exists using information_schema"""
         result = conn.execute(
-            "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = ?",
-            (table_name,)
+            "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = ?", (table_name,)
         ).fetchone()
-        return result[0] > 0
+        return bool(result[0] > 0)
 
-    def _get_columns(self, conn, table_name: str) -> List[str]:
+    def _get_columns(self, conn: Any, table_name: str) -> list[str]:
         """Get column names for a table using information_schema"""
         result = conn.execute(
-            "SELECT column_name FROM information_schema.columns WHERE table_name = ?",
-            (table_name,)
+            "SELECT column_name FROM information_schema.columns WHERE table_name = ?", (table_name,)
         ).fetchall()
         return [row[0] for row in result]
 
     def _init_database(self) -> None:
-        """Initialize database schema"""
+        """Initialize database schema and run pending migrations."""
         with self.get_connection() as conn:
             cursor = DictCursor(conn.cursor())
 
-            # Check if contracts table exists and needs migration
-            if self._table_exists(conn, 'contracts'):
-                columns = self._get_columns(conn, 'contracts')
-
-                if 'openalgo_symbol' not in columns:
-                    cursor.execute("ALTER TABLE contracts ADD COLUMN openalgo_symbol TEXT")
-                    conn.commit()
-                    logger.info("Added openalgo_symbol column to contracts table")
-
-                    cursor.execute("CREATE INDEX IF NOT EXISTS idx_openalgo_symbol ON contracts(openalgo_symbol)")
-                    conn.commit()
-                    logger.info("Created index for openalgo_symbol column")
-
-                if 'no_data' not in columns:
-                    cursor.execute("ALTER TABLE contracts ADD COLUMN no_data BOOLEAN DEFAULT FALSE")
-                    conn.commit()
-                    logger.info("Added no_data column to contracts table")
-
-                    # One-time migration: mark existing stuck contracts as no_data
-                    # These are contracts with data_fetched=FALSE that have no historical data
-                    # and their expiry date has passed (so they've been attempted before)
-                    result = cursor.execute("""
-                        UPDATE contracts c
-                        SET data_fetched = TRUE, no_data = TRUE
-                        WHERE c.data_fetched = FALSE
-                          AND c.expiry_date < CURRENT_DATE
-                          AND NOT EXISTS (
-                              SELECT 1 FROM historical_data h
-                              WHERE h.expired_instrument_key = c.expired_instrument_key
-                          )
-                        RETURNING expired_instrument_key
-                    """)
-                    fixed_count = len(result.fetchall())
-                    conn.commit()
-                    if fixed_count:
-                        logger.info(f"Migration: marked {fixed_count} stuck contracts as no_data")
-
-                if 'fetch_attempts' not in columns:
-                    cursor.execute("ALTER TABLE contracts ADD COLUMN fetch_attempts INTEGER DEFAULT 0")
-                    conn.commit()
-                    logger.info("Added fetch_attempts column to contracts table")
-
-                if 'last_attempted_at' not in columns:
-                    cursor.execute("ALTER TABLE contracts ADD COLUMN last_attempted_at TIMESTAMP")
-                    conn.commit()
-                    logger.info("Added last_attempted_at column to contracts table")
-
-            # Fix: mark expiries as contracts_fetched if they already have contracts
-            if self._table_exists(conn, 'expiries'):
-                result = cursor.execute("""
-                    UPDATE expiries e
-                    SET contracts_fetched = TRUE
-                    WHERE e.contracts_fetched = FALSE
-                      AND EXISTS (
-                          SELECT 1 FROM contracts c
-                          WHERE c.instrument_key = e.instrument_key
-                            AND c.expiry_date = e.expiry_date
-                      )
-                    RETURNING instrument_key, expiry_date
-                """)
-                fixed = result.fetchall()
-                conn.commit()
-                if fixed:
-                    logger.info(f"Migration: marked {len(fixed)} expiries as contracts_fetched")
-
-            # Check if historical_data table exists and needs oi column
-            if self._table_exists(conn, 'historical_data'):
-                columns = self._get_columns(conn, 'historical_data')
-
-                if 'oi' not in columns and 'open_interest' not in columns:
-                    cursor.execute("ALTER TABLE historical_data ADD COLUMN oi BIGINT DEFAULT 0")
-                    conn.commit()
-                    logger.info("Added oi column to historical_data table")
-
             # Create sequences for auto-increment columns
-            for seq in ['default_instruments_id_seq', 'expiries_id_seq', 'job_status_id_seq']:
+            for seq in ["default_instruments_id_seq", "expiries_id_seq", "job_status_id_seq"]:
                 cursor.execute(f"CREATE SEQUENCE IF NOT EXISTS {seq}")
 
             # Create credentials table for encrypted storage
@@ -279,6 +240,7 @@ class DatabaseManager:
                     symbol TEXT NOT NULL,
                     is_active BOOLEAN DEFAULT TRUE,
                     priority INTEGER DEFAULT 0,
+                    category TEXT DEFAULT 'Index',
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
@@ -347,8 +309,7 @@ class DatabaseManager:
                     close DECIMAL(10,2) NOT NULL,
                     volume BIGINT NOT NULL,
                     oi BIGINT DEFAULT 0,
-                    PRIMARY KEY (expired_instrument_key, timestamp),
-                    FOREIGN KEY (expired_instrument_key) REFERENCES contracts(expired_instrument_key)
+                    PRIMARY KEY (expired_instrument_key, timestamp)
                 )
             """)
 
@@ -370,6 +331,77 @@ class DatabaseManager:
                 )
             """)
 
+            # Create instrument_master table (for all Upstox instruments)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS instrument_master (
+                    instrument_key VARCHAR PRIMARY KEY,
+                    trading_symbol VARCHAR,
+                    name VARCHAR,
+                    exchange VARCHAR,
+                    segment VARCHAR NOT NULL,
+                    instrument_type VARCHAR,
+                    isin VARCHAR,
+                    lot_size INTEGER,
+                    tick_size DECIMAL(10,4),
+                    expiry DATE,
+                    strike_price DECIMAL(15,2),
+                    option_type VARCHAR,
+                    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            # Create candle_data table (for V3 historical candle data)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS candle_data (
+                    instrument_key VARCHAR NOT NULL,
+                    timestamp TIMESTAMP NOT NULL,
+                    open DECIMAL(15,4) NOT NULL,
+                    high DECIMAL(15,4) NOT NULL,
+                    low DECIMAL(15,4) NOT NULL,
+                    close DECIMAL(15,4) NOT NULL,
+                    volume BIGINT NOT NULL DEFAULT 0,
+                    oi BIGINT DEFAULT 0,
+                    interval VARCHAR NOT NULL DEFAULT '1day',
+                    PRIMARY KEY (instrument_key, timestamp, interval)
+                )
+            """)
+
+            # Create watchlists table
+            cursor.execute("""
+                CREATE SEQUENCE IF NOT EXISTS watchlists_id_seq
+            """)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS watchlists (
+                    id INTEGER PRIMARY KEY DEFAULT nextval('watchlists_id_seq'),
+                    name VARCHAR NOT NULL,
+                    segment VARCHAR,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            # Create watchlist_items table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS watchlist_items (
+                    watchlist_id INTEGER NOT NULL REFERENCES watchlists(id),
+                    instrument_key VARCHAR NOT NULL,
+                    added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (watchlist_id, instrument_key)
+                )
+            """)
+
+            # Create candle_collection_status table (track what's been collected)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS candle_collection_status (
+                    instrument_key VARCHAR NOT NULL,
+                    interval VARCHAR NOT NULL DEFAULT '1day',
+                    last_collected_date DATE,
+                    earliest_date DATE,
+                    candle_count BIGINT DEFAULT 0,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (instrument_key, interval)
+                )
+            """)
+
             # Create indices for performance
             indices = [
                 "CREATE INDEX IF NOT EXISTS idx_expiry_date ON contracts(expiry_date)",
@@ -378,764 +410,53 @@ class DatabaseManager:
                 "CREATE INDEX IF NOT EXISTS idx_openalgo_symbol ON contracts(openalgo_symbol)",
                 "CREATE INDEX IF NOT EXISTS idx_instrument_expiry ON contracts(instrument_key, expiry_date)",
                 "CREATE INDEX IF NOT EXISTS idx_historical_instrument ON historical_data(expired_instrument_key)",
-                "CREATE INDEX IF NOT EXISTS idx_job_status ON job_status(status, job_type)"
+                "CREATE INDEX IF NOT EXISTS idx_job_status ON job_status(status, job_type)",
+                # Instrument master indices
+                "CREATE INDEX IF NOT EXISTS idx_im_segment ON instrument_master(segment)",
+                "CREATE INDEX IF NOT EXISTS idx_im_type ON instrument_master(instrument_type)",
+                "CREATE INDEX IF NOT EXISTS idx_im_exchange ON instrument_master(exchange)",
+                "CREATE INDEX IF NOT EXISTS idx_im_symbol ON instrument_master(trading_symbol)",
+                # Candle data indices
+                "CREATE INDEX IF NOT EXISTS idx_candle_instrument ON candle_data(instrument_key)",
+                "CREATE INDEX IF NOT EXISTS idx_candle_interval ON candle_data(interval)",
+                "CREATE INDEX IF NOT EXISTS idx_candle_timestamp ON candle_data(timestamp)",
             ]
 
             for index in indices:
                 cursor.execute(index)
 
+            # Run versioned migrations
+            from .migrations.runner import MigrationRunner
+
+            runner = MigrationRunner(conn)
+            runner.run_pending()
+
             logger.info("Database schema initialized successfully")
 
-    # Credentials operations
-    def save_credentials(self, api_key: str, api_secret: str, redirect_uri: str = None) -> bool:
-        """Save encrypted credentials to database"""
-        from ..utils.encryption import encryption
+    # ── Cross-cutting queries (kept in facade) ────────────────
 
-        with self.get_connection() as conn:
-            cursor = DictCursor(conn.cursor())
-
-            # Encrypt sensitive data
-            encrypted_key = encryption.encrypt(api_key)
-            encrypted_secret = encryption.encrypt(api_secret)
-
-            # Check if credentials exist
-            cursor.execute("SELECT COUNT(*) FROM credentials")
-            exists = cursor.fetchone()[0] > 0
-
-            if exists:
-                cursor.execute("""
-                    UPDATE credentials
-                    SET api_key = ?, api_secret = ?, redirect_uri = ?, updated_at = CURRENT_TIMESTAMP
-                    WHERE id = 1
-                """, (encrypted_key, encrypted_secret, redirect_uri or _DEFAULT_REDIRECT_URI))
-            else:
-                cursor.execute("""
-                    INSERT INTO credentials (id, api_key, api_secret, redirect_uri)
-                    VALUES (1, ?, ?, ?)
-                """, (encrypted_key, encrypted_secret, redirect_uri or _DEFAULT_REDIRECT_URI))
-
-            return True
-
-    def get_credentials(self) -> Optional[Dict]:
-        """Get decrypted credentials from database"""
-        from ..utils.encryption import encryption
-
-        with self.get_connection() as conn:
-            cursor = DictCursor(conn.cursor())
-            cursor.execute("SELECT * FROM credentials WHERE id = 1")
-            row = cursor.fetchone()
-
-            if row:
-                return {
-                    'api_key': encryption.decrypt(row['api_key']),
-                    'api_secret': encryption.decrypt(row['api_secret']),
-                    'redirect_uri': row['redirect_uri'],
-                    'access_token': encryption.decrypt(row['access_token']) if row['access_token'] else None,
-                    'token_expiry': row['token_expiry']
-                }
-            return None
-
-    def save_token(self, access_token: str, expiry: float) -> bool:
-        """Save encrypted access token"""
-        from ..utils.encryption import encryption
-
-        with self.get_connection() as conn:
-            cursor = DictCursor(conn.cursor())
-            encrypted_token = encryption.encrypt(access_token)
-
-            cursor.execute("""
-                UPDATE credentials
-                SET access_token = ?, token_expiry = ?, updated_at = CURRENT_TIMESTAMP
-                WHERE id = 1
-            """, (encrypted_token, expiry))
-
-            return True
-
-    # Default instruments operations
-    def setup_default_instruments(self) -> bool:
-        """Setup default instruments for collection (#9 — expanded to 6)"""
-        default_instruments = [
-            {'key': 'NSE_INDEX|Nifty 50', 'symbol': 'Nifty 50', 'priority': 100},
-            {'key': 'NSE_INDEX|Nifty Bank', 'symbol': 'Bank Nifty', 'priority': 90},
-            {'key': 'BSE_INDEX|SENSEX', 'symbol': 'Sensex', 'priority': 80},
-            {'key': 'NSE_INDEX|Nifty Fin Service', 'symbol': 'FINNIFTY', 'priority': 70},
-            {'key': 'NSE_INDEX|NIFTY MID SELECT', 'symbol': 'MIDCPNIFTY', 'priority': 60},
-            {'key': 'BSE_INDEX|BANKEX', 'symbol': 'BANKEX', 'priority': 50},
-        ]
-
-        with self.get_connection() as conn:
-            cursor = DictCursor(conn.cursor())
-
-            for inst in default_instruments:
-                cursor.execute("""
-                    INSERT OR IGNORE INTO default_instruments (instrument_key, symbol, priority)
-                    VALUES (?, ?, ?)
-                """, (inst['key'], inst['symbol'], inst['priority']))
-
-            logger.info("Default instruments configured")
-            return True
-
-    def get_default_instruments(self) -> List[str]:
-        """Get list of default instruments to collect"""
-        with self.get_connection() as conn:
-            cursor = DictCursor(conn.cursor())
-            cursor.execute("""
-                SELECT instrument_key FROM default_instruments
-                WHERE is_active = TRUE
-                ORDER BY priority DESC
-            """)
-            return [row[0] for row in cursor.fetchall()]
-
-    # ── Active instrument CRUD (#9) ───────────────────────────
-    def get_active_instruments(self) -> List[Dict]:
-        """Get all active instruments with full details."""
-        with self.get_connection() as conn:
-            cursor = DictCursor(conn.cursor())
-            cursor.execute("""
-                SELECT id, instrument_key, symbol, is_active, priority
-                FROM default_instruments
-                ORDER BY priority DESC
-            """)
-            return [dict_from_row(row) for row in cursor.fetchall()]
-
-    def add_instrument(self, instrument_key: str, symbol: str, priority: int = 0) -> Optional[int]:
-        """Add a new instrument."""
-        with self.get_connection() as conn:
-            try:
-                result = conn.execute("""
-                    INSERT INTO default_instruments (instrument_key, symbol, priority)
-                    VALUES (?, ?, ?)
-                    RETURNING id
-                """, (instrument_key, symbol, priority))
-                row = result.fetchone()
-                conn.commit()
-                return row[0] if row else None
-            except Exception as e:
-                if 'unique' in str(e).lower() or 'duplicate' in str(e).lower():
-                    return None
-                raise
-
-    def toggle_instrument(self, instrument_id: int, is_active: bool) -> bool:
-        """Toggle instrument active status."""
-        with self.get_connection() as conn:
-            conn.execute("""
-                UPDATE default_instruments SET is_active = ? WHERE id = ?
-            """, (is_active, instrument_id))
-            conn.commit()
-            return True
-
-    def remove_instrument(self, instrument_id: int) -> bool:
-        """Remove an instrument by ID."""
-        with self.get_connection() as conn:
-            conn.execute("DELETE FROM default_instruments WHERE id = ?", (instrument_id,))
-            conn.commit()
-            return True
-
-    # ── API Keys (#10) ────────────────────────────────────────
-    def _ensure_api_keys_table(self, conn):
-        """Create api_keys table if it doesn't exist."""
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS api_keys (
-                id INTEGER PRIMARY KEY DEFAULT nextval('default_instruments_id_seq'),
-                key_name TEXT NOT NULL,
-                api_key TEXT UNIQUE NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                last_used_at TIMESTAMP,
-                is_active BOOLEAN DEFAULT TRUE,
-                rate_limit_per_hour INTEGER DEFAULT 1000
-            )
-        """)
-
-    def create_api_key(self, key_name: str) -> Optional[Dict]:
-        """Generate and store a new API key."""
-        import secrets as _secrets
-        api_key = 'expt_' + _secrets.token_urlsafe(32)
-        with self.get_connection() as conn:
-            self._ensure_api_keys_table(conn)
-            result = conn.execute("""
-                INSERT INTO api_keys (key_name, api_key)
-                VALUES (?, ?)
-                RETURNING id, key_name, api_key, created_at
-            """, (key_name, api_key))
-            row = result.fetchone()
-            conn.commit()
-            if row:
-                return {'id': row[0], 'key_name': row[1], 'api_key': row[2], 'created_at': str(row[3])}
-            return None
-
-    def verify_api_key(self, api_key: str) -> Optional[Dict]:
-        """Verify an API key and update last_used_at."""
-        with self.get_connection() as conn:
-            self._ensure_api_keys_table(conn)
-            cursor = DictCursor(conn.cursor())
-            cursor.execute("""
-                SELECT id, key_name, rate_limit_per_hour FROM api_keys
-                WHERE api_key = ? AND is_active = TRUE
-            """, (api_key,))
-            row = cursor.fetchone()
-            if row:
-                conn.execute("""
-                    UPDATE api_keys SET last_used_at = CURRENT_TIMESTAMP WHERE api_key = ?
-                """, (api_key,))
-                conn.commit()
-                return dict_from_row(row)
-            return None
-
-    def list_api_keys(self) -> List[Dict]:
-        """List all API keys (masked)."""
-        with self.get_connection() as conn:
-            self._ensure_api_keys_table(conn)
-            cursor = DictCursor(conn.cursor())
-            cursor.execute("""
-                SELECT id, key_name, api_key, created_at, last_used_at, is_active, rate_limit_per_hour
-                FROM api_keys ORDER BY created_at DESC
-            """)
-            keys = []
-            for row in cursor.fetchall():
-                d = dict_from_row(row)
-                # Mask API key for display
-                full_key = d['api_key']
-                d['api_key_masked'] = full_key[:9] + '...' + full_key[-4:]
-                keys.append(d)
-            return keys
-
-    def revoke_api_key(self, key_id: int) -> bool:
-        """Revoke an API key."""
-        with self.get_connection() as conn:
-            self._ensure_api_keys_table(conn)
-            conn.execute("UPDATE api_keys SET is_active = FALSE WHERE id = ?", (key_id,))
-            conn.commit()
-            return True
-
-    # ── Retry Logic (#15) ─────────────────────────────────────
-    def increment_fetch_attempt(self, expired_key: str) -> None:
-        """Increment fetch_attempts and set last_attempted_at."""
-        with self.get_connection() as conn:
-            conn.execute("""
-                UPDATE contracts
-                SET fetch_attempts = fetch_attempts + 1,
-                    last_attempted_at = CURRENT_TIMESTAMP
-                WHERE expired_instrument_key = ?
-            """, (expired_key,))
-            conn.commit()
-
-    def get_failed_contracts(self, instrument_key: Optional[str] = None) -> List[Dict]:
-        """Get contracts that failed fetching (fetch_attempts > 0, data_fetched = FALSE)."""
-        with self.get_connection() as conn:
-            cursor = DictCursor(conn.cursor())
-            where = "WHERE c.data_fetched = FALSE AND c.fetch_attempts > 0 AND c.no_data = FALSE"
-            params = []
-            if instrument_key:
-                where += " AND c.instrument_key = ?"
-                params.append(instrument_key)
-            cursor.execute(f"""
-                SELECT c.expired_instrument_key, c.instrument_key, c.expiry_date,
-                       c.trading_symbol, c.fetch_attempts, c.last_attempted_at
-                FROM contracts c
-                {where}
-                ORDER BY c.last_attempted_at
-            """, params)
-            return [dict_from_row(row) for row in cursor.fetchall()]
-
-    def reset_fetch_attempts(self, instrument_key: Optional[str] = None) -> int:
-        """Reset fetch_attempts for failed contracts so they can be retried."""
-        with self.get_connection() as conn:
-            where = "WHERE data_fetched = FALSE AND fetch_attempts > 0 AND no_data = FALSE"
-            params = []
-            if instrument_key:
-                where += " AND instrument_key = ?"
-                params.append(instrument_key)
-            result = conn.execute(f"""
-                UPDATE contracts
-                SET fetch_attempts = 0, last_attempted_at = NULL
-                {where}
-                RETURNING expired_instrument_key
-            """, params)
-            count = len(result.fetchall())
-            conn.commit()
-            return count
-
-    # Instrument operations
-    def insert_instrument(self, instrument_data: Dict) -> bool:
-        """Insert or update instrument"""
-        with self.get_connection() as conn:
-            cursor = DictCursor(conn.cursor())
-            cursor.execute("""
-                INSERT OR REPLACE INTO instruments
-                (instrument_key, symbol, name, exchange, segment, underlying_type)
-                VALUES (?, ?, ?, ?, ?, ?)
-            """, (
-                instrument_data['instrument_key'],
-                instrument_data['symbol'],
-                instrument_data.get('name'),
-                instrument_data.get('exchange'),
-                instrument_data.get('segment'),
-                instrument_data.get('underlying_type')
-            ))
-            return True
-
-    # Expiry operations
-    def insert_expiries(self, instrument_key: str, expiry_dates: List[str]) -> int:
-        """Insert multiple expiry dates"""
-        with self.get_connection() as conn:
-            cursor = DictCursor(conn.cursor())
-
-            # Get existing expiries to determine what's new
-            cursor.execute(
-                "SELECT expiry_date FROM expiries WHERE instrument_key = ?",
-                (instrument_key,)
-            )
-            existing = {str(row[0]) for row in cursor.fetchall()}
-
-            count = 0
-            for expiry_date in expiry_dates:
-                if expiry_date in existing:
-                    continue
-                try:
-                    date_obj = datetime.strptime(expiry_date, '%Y-%m-%d')
-                    is_weekly = date_obj.weekday() == 3  # Thursday
-
-                    cursor.execute("""
-                        INSERT OR IGNORE INTO expiries
-                        (instrument_key, expiry_date, is_weekly)
-                        VALUES (?, ?, ?)
-                    """, (instrument_key, expiry_date, is_weekly))
-                    count += 1
-                except Exception as e:
-                    logger.error(f"Failed to insert expiry {expiry_date}: {e}")
-
-            logger.info(f"Inserted {count} new expiries for {instrument_key}")
-            return count
-
-    def get_pending_expiries(self, instrument_key: str) -> List[Dict]:
-        """Get expiries that haven't been processed"""
-        with self.get_connection() as conn:
-            cursor = DictCursor(conn.cursor())
-            cursor.execute("""
-                SELECT * FROM expiries
-                WHERE instrument_key = ? AND contracts_fetched = FALSE
-                ORDER BY expiry_date
-            """, (instrument_key,))
-            return [dict_from_row(row) for row in cursor.fetchall()]
-
-    def mark_expiry_contracts_fetched(self, instrument_key: str, expiry_date: str) -> None:
-        """Mark an expiry as having its contracts fetched."""
-        with self.get_connection() as conn:
-            conn.execute("""
-                UPDATE expiries
-                SET contracts_fetched = TRUE
-                WHERE instrument_key = ? AND expiry_date = ?
-            """, (instrument_key, expiry_date))
-            conn.commit()
-
-    # Contract operations
-    def insert_contracts(self, contracts: List[Dict]) -> int:
-        """Insert multiple contracts. Skips contracts that already exist to preserve
-        data_fetched, no_data, and fetch_attempts state."""
-        from ..utils.openalgo_symbol import to_openalgo_symbol
-
-        with self.get_connection() as conn:
-            cursor = DictCursor(conn.cursor())
-            inserted = 0
-            skipped = 0
-
-            for contract in contracts:
-                try:
-                    expired_key = contract.get('instrument_key', '')
-                    openalgo_symbol = to_openalgo_symbol(contract)
-
-                    cursor.execute("""
-                        INSERT OR IGNORE INTO contracts
-                        (expired_instrument_key, instrument_key, expiry_date,
-                         contract_type, strike_price, trading_symbol, openalgo_symbol,
-                         lot_size, tick_size, exchange_token, freeze_quantity, minimum_lot, metadata)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """, (
-                        expired_key,
-                        contract.get('underlying_key', ''),
-                        contract.get('expiry', ''),
-                        contract.get('instrument_type', ''),  # CE, PE, FUT
-                        contract.get('strike_price'),
-                        contract.get('trading_symbol', ''),
-                        openalgo_symbol,
-                        contract.get('lot_size'),
-                        contract.get('tick_size'),
-                        contract.get('exchange_token', ''),
-                        contract.get('freeze_quantity'),
-                        contract.get('minimum_lot'),
-                        json.dumps(contract)
-                    ))
-                    # DuckDB returns -1 for rowcount, check if key existed
-                    inserted += 1
-                except Exception as e:
-                    if 'duplicate' in str(e).lower() or 'unique' in str(e).lower():
-                        skipped += 1
-                    else:
-                        logger.error(f"Failed to insert contract {contract.get('trading_symbol')}: {e}")
-
-            if skipped:
-                logger.info(f"Inserted {inserted} contracts, skipped {skipped} existing")
-            else:
-                logger.info(f"Inserted {inserted} contracts")
-            return inserted
-
-    def get_pending_contracts(self, limit: int = 100) -> List[Dict]:
-        """Get contracts that need historical data fetched"""
-        with self.get_connection() as conn:
-            cursor = DictCursor(conn.cursor())
-            cursor.execute("""
-                SELECT * FROM contracts
-                WHERE data_fetched = FALSE
-                LIMIT ?
-            """, (limit,))
-            return [dict_from_row(row) for row in cursor.fetchall()]
-
-    def get_fetched_keys(self, expired_keys: list) -> set:
-        """Return the subset of expired_instrument_keys that already have data_fetched=TRUE."""
-        if not expired_keys:
-            return set()
-        with self.get_connection() as conn:
-            placeholders = ','.join(['?'] * len(expired_keys))
-            rows = conn.execute(f"""
-                SELECT expired_instrument_key FROM contracts
-                WHERE data_fetched = TRUE
-                AND expired_instrument_key IN ({placeholders})
-            """, expired_keys).fetchall()
-            return {row[0] for row in rows}
-
-    # Historical data operations
-    def insert_historical_data(self, expired_instrument_key: str, candles: List[List]) -> int:
-        """
-        Insert historical OHLCV data using DataFrame bulk insert for performance.
-
-        Args:
-            expired_instrument_key: Contract identifier
-            candles: List of [timestamp, open, high, low, close, volume, oi]
-
-        Returns:
-            Number of records inserted
-        """
-        with self.get_connection() as conn:
-            count = 0
-
-            # Prepare batch insert
-            data_to_insert = []
-            for candle in candles:
-                try:
-                    timestamp = candle[0]
-                    open_price = float(candle[1])
-                    high = float(candle[2])
-                    low = float(candle[3])
-                    close = float(candle[4])
-                    volume = int(candle[5])
-                    open_interest = int(candle[6]) if len(candle) > 6 else None
-
-                    data_to_insert.append({
-                        'expired_instrument_key': expired_instrument_key,
-                        'timestamp': timestamp,
-                        'open': open_price,
-                        'high': high,
-                        'low': low,
-                        'close': close,
-                        'volume': volume,
-                        'oi': open_interest
-                    })
-                except Exception as e:
-                    logger.error(f"Failed to parse candle: {e}")
-
-            # DataFrame bulk insert — ~500x faster than executemany in DuckDB
-            if data_to_insert:
-                try:
-                    conn.execute("BEGIN TRANSACTION")
-                    df = pd.DataFrame(data_to_insert)
-                    conn.execute("""
-                        INSERT OR REPLACE INTO historical_data
-                        SELECT * FROM df
-                    """)
-
-                    # Mark contract as data fetched (atomic with insert)
-                    conn.execute("""
-                        UPDATE contracts
-                        SET data_fetched = TRUE,
-                            no_data = FALSE,
-                            fetch_attempts = fetch_attempts + 1,
-                            last_attempted_at = CURRENT_TIMESTAMP
-                        WHERE expired_instrument_key = ?
-                    """, (expired_instrument_key,))
-                    conn.commit()
-
-                    count = len(data_to_insert)
-                    logger.info(f"Successfully inserted {count} candles for {expired_instrument_key}")
-
-                except Exception as e:
-                    logger.error(f"Failed to insert historical data for {expired_instrument_key}: {e}")
-                    try:
-                        conn.rollback()
-                    except Exception:
-                        pass
-                    raise
-            else:
-                logger.warning(f"No data to insert for {expired_instrument_key}")
-
-            return count
-
-    def mark_contract_no_data(self, expired_instrument_key: str) -> None:
-        """Mark a contract as fetched but with no data available from the API."""
-        with self.get_connection() as conn:
-            conn.execute("""
-                UPDATE contracts
-                SET data_fetched = TRUE,
-                    no_data = TRUE,
-                    fetch_attempts = fetch_attempts + 1,
-                    last_attempted_at = CURRENT_TIMESTAMP
-                WHERE expired_instrument_key = ?
-            """, (expired_instrument_key,))
-            conn.commit()
-            logger.info(f"Marked contract {expired_instrument_key} as no_data")
-
-    def reset_contracts_for_refetch(self, instrument_key: str, expiry_date: str) -> int:
-        """Reset data_fetched flag for all contracts of an instrument+expiry,
-        so they will be re-downloaded on the next collection run."""
-        with self.get_connection() as conn:
-            result = conn.execute("""
-                UPDATE contracts
-                SET data_fetched = FALSE, no_data = FALSE
-                WHERE instrument_key = ? AND expiry_date = ?
-                RETURNING expired_instrument_key
-            """, (instrument_key, expiry_date))
-            count = len(result.fetchall())
-            conn.commit()
-            logger.info(f"Reset {count} contracts for {instrument_key} expiry {expiry_date}")
-            return count
-
-    # Job management
-    def create_job(self, job_type: str, **kwargs) -> int:
-        """Create a new job entry"""
-        with self.get_connection() as conn:
-            result = conn.execute("""
-                INSERT INTO job_status
-                (job_type, instrument_key, expiry_date, contract_key, status, started_at)
-                VALUES (?, ?, ?, ?, 'pending', CURRENT_TIMESTAMP)
-                RETURNING id
-            """, (
-                job_type,
-                kwargs.get('instrument_key'),
-                kwargs.get('expiry_date'),
-                kwargs.get('contract_key')
-            )).fetchone()
-            return result[0]
-
-    def update_job_status(self, job_id: int, status: str, error: Optional[str] = None) -> None:
-        """Update job status"""
-        with self.get_connection() as conn:
-            cursor = DictCursor(conn.cursor())
-
-            if status == 'completed':
-                cursor.execute("""
-                    UPDATE job_status
-                    SET status = ?, completed_at = CURRENT_TIMESTAMP
-                    WHERE id = ?
-                """, (status, job_id))
-            elif status == 'failed':
-                cursor.execute("""
-                    UPDATE job_status
-                    SET status = ?, error_message = ?, retry_count = retry_count + 1
-                    WHERE id = ?
-                """, (status, error, job_id))
-            else:
-                cursor.execute("""
-                    UPDATE job_status
-                    SET status = ?
-                    WHERE id = ?
-                """, (status, job_id))
-
-    def save_checkpoint(self, job_id: int, checkpoint_data: Dict) -> None:
-        """Save job checkpoint for resume"""
-        with self.get_connection() as conn:
-            cursor = DictCursor(conn.cursor())
-            cursor.execute("""
-                UPDATE job_status
-                SET checkpoint = ?
-                WHERE id = ?
-            """, (json.dumps(checkpoint_data), job_id))
-
-    # Query operations
-    def get_historical_data_count(self, expired_instrument_key: str = None) -> int:
-        """Get count of historical data records"""
-        with self.get_connection() as conn:
-            cursor = DictCursor(conn.cursor())
-            if expired_instrument_key:
-                cursor.execute("""
-                    SELECT COUNT(*) FROM historical_data
-                    WHERE expired_instrument_key = ?
-                """, (expired_instrument_key,))
-            else:
-                cursor.execute("SELECT COUNT(*) FROM historical_data")
-            return cursor.fetchone()[0]
-
-    def get_summary_stats(self) -> Dict:
+    def get_summary_stats(self) -> dict:
         """Get database summary statistics"""
-        with self.get_connection() as conn:
+        with self.get_read_connection() as conn:
             cursor = DictCursor(conn.cursor())
-
             stats = {}
-
-            # Count instruments
             cursor.execute("SELECT COUNT(*) FROM instruments")
-            stats['total_instruments'] = cursor.fetchone()[0]
-
-            # Count expiries
+            stats["total_instruments"] = cursor.fetchone()[0]
             cursor.execute("SELECT COUNT(*) FROM expiries")
-            stats['total_expiries'] = cursor.fetchone()[0]
-
-            # Count contracts
+            stats["total_expiries"] = cursor.fetchone()[0]
             cursor.execute("SELECT COUNT(*) FROM contracts")
-            stats['total_contracts'] = cursor.fetchone()[0]
-
-            # Count historical data
+            stats["total_contracts"] = cursor.fetchone()[0]
             cursor.execute("SELECT COUNT(*) FROM historical_data")
-            stats['total_candles'] = cursor.fetchone()[0]
-
-            # Pending work
+            stats["total_candles"] = cursor.fetchone()[0]
             cursor.execute("SELECT COUNT(*) FROM expiries WHERE contracts_fetched = FALSE")
-            stats['pending_expiries'] = cursor.fetchone()[0]
-
+            stats["pending_expiries"] = cursor.fetchone()[0]
             cursor.execute("SELECT COUNT(*) FROM contracts WHERE data_fetched = FALSE")
-            stats['pending_contracts'] = cursor.fetchone()[0]
-
+            stats["pending_contracts"] = cursor.fetchone()[0]
+            cursor.execute("SELECT COUNT(*) FROM instrument_master")
+            stats["master_instruments"] = cursor.fetchone()[0]
+            cursor.execute("SELECT COUNT(*) FROM candle_data")
+            stats["total_candle_data"] = cursor.fetchone()[0]
             return stats
-
-    # OpenAlgo symbol queries
-    def get_contract_by_openalgo_symbol(self, openalgo_symbol: str) -> Optional[Dict]:
-        """Get contract by OpenAlgo symbol"""
-        with self.get_connection() as conn:
-            cursor = DictCursor(conn.cursor())
-            cursor.execute("""
-                SELECT * FROM contracts
-                WHERE openalgo_symbol = ?
-            """, (openalgo_symbol,))
-            row = cursor.fetchone()
-            return dict_from_row(row) if row else None
-
-    def get_contracts_by_base_symbol(self, base_symbol: str) -> List[Dict]:
-        """Get all contracts for a base symbol (e.g., 'NIFTY', 'BANKNIFTY')"""
-        with self.get_connection() as conn:
-            cursor = DictCursor(conn.cursor())
-            cursor.execute("""
-                SELECT * FROM contracts
-                WHERE openalgo_symbol LIKE ?
-                ORDER BY expiry_date, strike_price
-            """, (f"{base_symbol}%",))
-            return [dict_from_row(row) for row in cursor.fetchall()]
-
-    def get_option_chain(self, base_symbol: str, expiry_date: str) -> Dict[str, List[Dict]]:
-        """Get option chain for a symbol and expiry"""
-        with self.get_connection() as conn:
-            cursor = DictCursor(conn.cursor())
-
-            # Format expiry date for OpenAlgo format (DDMMMYY)
-            from ..utils.openalgo_symbol import OpenAlgoSymbolGenerator
-            formatted_date = OpenAlgoSymbolGenerator.format_expiry_date(expiry_date)
-
-            # Get calls
-            cursor.execute("""
-                SELECT * FROM contracts
-                WHERE openalgo_symbol LIKE ? AND openalgo_symbol LIKE '%CE'
-                ORDER BY strike_price
-            """, (f"{base_symbol}{formatted_date}%",))
-            calls = [dict_from_row(row) for row in cursor.fetchall()]
-
-            # Get puts
-            cursor.execute("""
-                SELECT * FROM contracts
-                WHERE openalgo_symbol LIKE ? AND openalgo_symbol LIKE '%PE'
-                ORDER BY strike_price
-            """, (f"{base_symbol}{formatted_date}%",))
-            puts = [dict_from_row(row) for row in cursor.fetchall()]
-
-            return {"calls": calls, "puts": puts}
-
-    def get_futures_by_symbol(self, base_symbol: str) -> List[Dict]:
-        """Get all futures contracts for a symbol"""
-        with self.get_connection() as conn:
-            cursor = DictCursor(conn.cursor())
-            cursor.execute("""
-                SELECT * FROM contracts
-                WHERE openalgo_symbol LIKE ? AND openalgo_symbol LIKE '%FUT'
-                ORDER BY expiry_date
-            """, (f"{base_symbol}%",))
-            return [dict_from_row(row) for row in cursor.fetchall()]
-
-    def search_openalgo_symbols(self, pattern: str) -> List[Dict]:
-        """Search for contracts by OpenAlgo symbol pattern"""
-        with self.get_connection() as conn:
-            cursor = DictCursor(conn.cursor())
-            cursor.execute("""
-                SELECT openalgo_symbol, trading_symbol, expiry_date,
-                       contract_type, strike_price
-                FROM contracts
-                WHERE openalgo_symbol LIKE ?
-                ORDER BY openalgo_symbol
-                LIMIT 100
-            """, (f"%{pattern}%",))
-            return [dict_from_row(row) for row in cursor.fetchall()]
-
-    def get_expiries_for_instrument(self, instrument: str) -> List[str]:
-        """Get all unique expiry dates for an instrument from the database
-
-        Args:
-            instrument: Instrument key (e.g., 'NSE_INDEX|Nifty 50')
-
-        Returns:
-            List of expiry dates as strings
-        """
-        with self.get_connection() as conn:
-            cursor = DictCursor(conn.cursor())
-            cursor.execute("""
-                SELECT DISTINCT expiry_date FROM contracts
-                WHERE instrument_key = ?
-                ORDER BY expiry_date DESC
-            """, (instrument,))
-            return [str(row[0]) for row in cursor.fetchall()]
-
-    def get_contracts_for_expiry(self, instrument: str, expiry_date: str) -> List[Dict]:
-        """Get all contracts for an instrument and expiry date
-
-        Args:
-            instrument: Instrument key
-            expiry_date: Expiry date string
-
-        Returns:
-            List of contract dictionaries
-        """
-        with self.get_connection() as conn:
-            cursor = DictCursor(conn.cursor())
-            cursor.execute("""
-                SELECT * FROM contracts
-                WHERE instrument_key = ?
-                AND expiry_date = ?
-                ORDER BY strike_price, contract_type
-            """, (instrument, expiry_date))
-            return [dict_from_row(row) for row in cursor.fetchall()]
-
-    def get_historical_data(self, expired_instrument_key: str) -> List[List]:
-        """Get historical data for a specific expired instrument
-
-        Args:
-            expired_instrument_key: The expired instrument key
-
-        Returns:
-            List of candles [timestamp, open, high, low, close, volume, oi]
-        """
-        with self.get_connection() as conn:
-            cursor = DictCursor(conn.cursor())
-            cursor.execute("""
-                SELECT timestamp, open, high, low, close, volume, oi
-                FROM historical_data
-                WHERE expired_instrument_key = ?
-                ORDER BY timestamp
-            """, (expired_instrument_key,))
-            return [list(row) for row in cursor.fetchall()]
 
     def vacuum(self) -> None:
         """Optimize database"""
@@ -1143,10 +464,209 @@ class DatabaseManager:
             conn.execute("CHECKPOINT")
             logger.info("Database optimized (CHECKPOINT completed)")
 
+    # ── Backward-compatible delegation methods ────────────────
+    # These delegate to the appropriate repository so that existing
+    # callers (blueprints, CLI, scripts) continue to work unchanged.
+
+    # Credentials
+    def save_credentials(self, *a: Any, **kw: Any) -> Any:
+        return self.credentials.save_credentials(*a, **kw)
+
+    def get_credentials(self) -> Any:
+        return self.credentials.get_credentials()
+
+    def save_token(self, *a: Any, **kw: Any) -> Any:
+        return self.credentials.save_token(*a, **kw)
+
+    def _ensure_api_keys_table(self, conn: Any) -> Any:
+        return self.credentials._ensure_api_keys_table(conn)
+
+    def create_api_key(self, *a: Any, **kw: Any) -> Any:
+        return self.credentials.create_api_key(*a, **kw)
+
+    def verify_api_key(self, *a: Any, **kw: Any) -> Any:
+        return self.credentials.verify_api_key(*a, **kw)
+
+    def list_api_keys(self) -> Any:
+        return self.credentials.list_api_keys()
+
+    def revoke_api_key(self, *a: Any, **kw: Any) -> Any:
+        return self.credentials.revoke_api_key(*a, **kw)
+
+    # Instruments (default instruments CRUD + F&O)
+    def setup_default_instruments(self) -> Any:
+        return self.instruments.setup_default_instruments()
+
+    def get_default_instruments(self) -> Any:
+        return self.instruments.get_default_instruments()
+
+    def get_active_instruments(self) -> Any:
+        return self.instruments.get_active_instruments()
+
+    def add_instrument(self, *a: Any, **kw: Any) -> Any:
+        return self.instruments.add_instrument(*a, **kw)
+
+    def toggle_instrument(self, *a: Any, **kw: Any) -> Any:
+        return self.instruments.toggle_instrument(*a, **kw)
+
+    def remove_instrument(self, *a: Any, **kw: Any) -> Any:
+        return self.instruments.remove_instrument(*a, **kw)
+
+    def insert_instrument(self, *a: Any, **kw: Any) -> Any:
+        return self.instruments.insert_instrument(*a, **kw)
+
+    def get_fo_underlying_instruments(self, *a: Any, **kw: Any) -> Any:
+        return self.instruments.get_fo_underlying_instruments(*a, **kw)
+
+    def get_fo_available_instruments(self, *a: Any, **kw: Any) -> Any:
+        return self.instruments.get_fo_available_instruments(*a, **kw)
+
+    def bulk_import_fo_instruments(self, *a: Any, **kw: Any) -> Any:
+        return self.instruments.bulk_import_fo_instruments(*a, **kw)
+
+    # Contracts (expiries, contracts, OpenAlgo queries, retry/reset)
+    def insert_expiries(self, *a: Any, **kw: Any) -> Any:
+        return self.contracts.insert_expiries(*a, **kw)
+
+    def get_pending_expiries(self, *a: Any, **kw: Any) -> Any:
+        return self.contracts.get_pending_expiries(*a, **kw)
+
+    def mark_expiry_contracts_fetched(self, *a: Any, **kw: Any) -> Any:
+        return self.contracts.mark_expiry_contracts_fetched(*a, **kw)
+
+    def insert_contracts(self, *a: Any, **kw: Any) -> Any:
+        return self.contracts.insert_contracts(*a, **kw)
+
+    def get_pending_contracts(self, *a: Any, **kw: Any) -> Any:
+        return self.contracts.get_pending_contracts(*a, **kw)
+
+    def get_fetched_keys(self, *a: Any, **kw: Any) -> Any:
+        return self.contracts.get_fetched_keys(*a, **kw)
+
+    def get_contract_by_openalgo_symbol(self, *a: Any, **kw: Any) -> Any:
+        return self.contracts.get_contract_by_openalgo_symbol(*a, **kw)
+
+    def get_contracts_by_base_symbol(self, *a: Any, **kw: Any) -> Any:
+        return self.contracts.get_contracts_by_base_symbol(*a, **kw)
+
+    def get_option_chain(self, *a: Any, **kw: Any) -> Any:
+        return self.contracts.get_option_chain(*a, **kw)
+
+    def get_futures_by_symbol(self, *a: Any, **kw: Any) -> Any:
+        return self.contracts.get_futures_by_symbol(*a, **kw)
+
+    def search_openalgo_symbols(self, *a: Any, **kw: Any) -> Any:
+        return self.contracts.search_openalgo_symbols(*a, **kw)
+
+    def get_expiries_for_instrument(self, *a: Any, **kw: Any) -> Any:
+        return self.contracts.get_expiries_for_instrument(*a, **kw)
+
+    def get_contracts_for_expiry(self, *a: Any, **kw: Any) -> Any:
+        return self.contracts.get_contracts_for_expiry(*a, **kw)
+
+    def increment_fetch_attempt(self, *a: Any, **kw: Any) -> Any:
+        return self.contracts.increment_fetch_attempt(*a, **kw)
+
+    def get_failed_contracts(self, *a: Any, **kw: Any) -> Any:
+        return self.contracts.get_failed_contracts(*a, **kw)
+
+    def reset_fetch_attempts(self, *a: Any, **kw: Any) -> Any:
+        return self.contracts.reset_fetch_attempts(*a, **kw)
+
+    def reset_contracts_for_refetch(self, *a: Any, **kw: Any) -> Any:
+        return self.contracts.reset_contracts_for_refetch(*a, **kw)
+
+    # Historical data
+    def insert_historical_data(self, *a: Any, **kw: Any) -> Any:
+        return self.historical.insert_historical_data(*a, **kw)
+
+    def mark_contract_no_data(self, *a: Any, **kw: Any) -> Any:
+        return self.historical.mark_contract_no_data(*a, **kw)
+
+    def get_historical_data(self, *a: Any, **kw: Any) -> Any:
+        return self.historical.get_historical_data(*a, **kw)
+
+    def get_historical_data_count(self, *a: Any, **kw: Any) -> Any:
+        return self.historical.get_historical_data_count(*a, **kw)
+
+    # Instrument master
+    def bulk_insert_instrument_master(self, *a: Any, **kw: Any) -> Any:
+        return self.instrument_master.bulk_insert_instrument_master(*a, **kw)
+
+    def search_instrument_master(self, *a: Any, **kw: Any) -> Any:
+        return self.instrument_master.search_instrument_master(*a, **kw)
+
+    def get_instrument_master_segments(self) -> Any:
+        return self.instrument_master.get_instrument_master_segments()
+
+    def get_instruments_by_segment(self, *a: Any, **kw: Any) -> Any:
+        return self.instrument_master.get_instruments_by_segment(*a, **kw)
+
+    def get_instrument_master_last_sync(self) -> Any:
+        return self.instrument_master.get_instrument_master_last_sync()
+
+    def get_instrument_types_by_segment(self, *a: Any, **kw: Any) -> Any:
+        return self.instrument_master.get_instrument_types_by_segment(*a, **kw)
+
+    def get_instrument_keys_by_segment(self, *a: Any, **kw: Any) -> Any:
+        return self.instrument_master.get_instrument_keys_by_segment(*a, **kw)
+
+    def get_instrument_master_count(self, *a: Any, **kw: Any) -> Any:
+        return self.instrument_master.get_instrument_master_count(*a, **kw)
+
+    # Candle data
+    def insert_candle_data(self, *a: Any, **kw: Any) -> Any:
+        return self.candles.insert_candle_data(*a, **kw)
+
+    def get_candle_data(self, *a: Any, **kw: Any) -> Any:
+        return self.candles.get_candle_data(*a, **kw)
+
+    def get_candle_data_count(self, *a: Any, **kw: Any) -> Any:
+        return self.candles.get_candle_data_count(*a, **kw)
+
+    def get_candle_collection_status(self, *a: Any, **kw: Any) -> Any:
+        return self.candles.get_candle_collection_status(*a, **kw)
+
+    def get_last_candle_timestamps(self, *a: Any, **kw: Any) -> Any:
+        return self.candles.get_last_candle_timestamps(*a, **kw)
+
+    def get_candle_analytics_summary(self) -> Any:
+        return self.candles.get_candle_analytics_summary()
+
+    # Watchlists
+    def create_watchlist(self, *a: Any, **kw: Any) -> Any:
+        return self.watchlists.create_watchlist(*a, **kw)
+
+    def get_watchlists(self) -> Any:
+        return self.watchlists.get_watchlists()
+
+    def get_watchlist_items(self, *a: Any, **kw: Any) -> Any:
+        return self.watchlists.get_watchlist_items(*a, **kw)
+
+    def add_to_watchlist(self, *a: Any, **kw: Any) -> Any:
+        return self.watchlists.add_to_watchlist(*a, **kw)
+
+    def remove_from_watchlist(self, *a: Any, **kw: Any) -> Any:
+        return self.watchlists.remove_from_watchlist(*a, **kw)
+
+    def delete_watchlist(self, *a: Any, **kw: Any) -> Any:
+        return self.watchlists.delete_watchlist(*a, **kw)
+
+    # Jobs
+    def create_job(self, *a: Any, **kw: Any) -> Any:
+        return self.jobs.create_job(*a, **kw)
+
+    def update_job_status(self, *a: Any, **kw: Any) -> Any:
+        return self.jobs.update_job_status(*a, **kw)
+
+    def save_checkpoint(self, *a: Any, **kw: Any) -> Any:
+        return self.jobs.save_checkpoint(*a, **kw)
+
     def __str__(self) -> str:
-        """String representation"""
         stats = self.get_summary_stats()
-        return (f"DatabaseManager(type={self.db_type}, "
-                f"instruments={stats['total_instruments']}, "
-                f"contracts={stats['total_contracts']}, "
-                f"candles={stats['total_candles']:,})")
+        return (
+            f"DatabaseManager(type={self.db_type}, "
+            f"instruments={stats['total_instruments']}, "
+            f"contracts={stats['total_contracts']}, "
+            f"candles={stats['total_candles']:,})"
+        )

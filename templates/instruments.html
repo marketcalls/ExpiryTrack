@@ -1,0 +1,931 @@
+{% extends "base.html" %}
+{% block title %}Instruments - ExpiryTrack{% endblock %}
+
+{% block content %}
+<div class="container mx-auto px-4 py-8 max-w-7xl">
+    <div class="flex items-center justify-between mb-6">
+        <div>
+            <h1 class="text-3xl font-bold">Instrument Browser</h1>
+            <p class="text-gray-500 mt-1">Browse, search, and manage instruments from all Upstox segments</p>
+        </div>
+        <div class="flex gap-2">
+            <button id="btn-sync" onclick="syncMaster()" class="btn btn-supabase">
+                <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                </svg>
+                Sync Master Data
+            </button>
+        </div>
+    </div>
+
+    <!-- Sync Status Alert -->
+    <div id="sync-status" class="hidden mb-4">
+        <div class="alert alert-info shadow-sm">
+            <span class="loading loading-spinner loading-sm"></span>
+            <span id="sync-message">Syncing instrument master data...</span>
+        </div>
+    </div>
+
+    <!-- Stats Bar -->
+    <div id="stats-bar" class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+        <div class="card-minimal p-4 text-center">
+            <div class="text-2xl font-bold supabase-text-gradient" id="stat-total">--</div>
+            <div class="text-sm text-gray-500">Total Instruments</div>
+        </div>
+        <div class="card-minimal p-4 text-center">
+            <div class="text-2xl font-bold supabase-text-gradient" id="stat-segments">--</div>
+            <div class="text-sm text-gray-500">Segments</div>
+        </div>
+        <div class="card-minimal p-4 text-center">
+            <div class="text-2xl font-bold supabase-text-gradient" id="stat-last-sync">--</div>
+            <div class="text-sm text-gray-500">Last Sync</div>
+        </div>
+        <div class="card-minimal p-4 text-center">
+            <div class="text-2xl font-bold supabase-text-gradient" id="stat-watchlists">--</div>
+            <div class="text-sm text-gray-500">Watchlists</div>
+        </div>
+    </div>
+
+    <!-- Candle Collection Progress Panel -->
+    <div id="candle-progress-panel" class="hidden mb-6">
+        <div class="card-minimal p-0 overflow-hidden" style="border: 1px solid #3ecf8e;">
+            <div style="background: linear-gradient(135deg, #3ecf8e 0%, #1dd1a1 100%); padding: 12px 20px;">
+                <div class="flex items-center justify-between">
+                    <h3 class="text-white font-semibold text-lg">Candle Collection</h3>
+                    <div id="progress-actions" class="hidden flex gap-2">
+                        <button onclick="dismissProgress()" class="btn btn-xs btn-ghost text-white" style="border: 1px solid rgba(255,255,255,0.3);">Dismiss</button>
+                        <button onclick="startNewCandleCollection()" class="btn btn-xs text-green-700" style="background: white;">New Collection</button>
+                    </div>
+                </div>
+            </div>
+            <div class="p-5">
+                <!-- Main progress bar -->
+                <div class="mb-4">
+                    <div class="flex justify-between text-sm mb-1">
+                        <span id="progress-label" class="font-medium">Starting...</span>
+                        <span id="progress-pct" class="font-mono font-semibold" style="color: #3ecf8e;">0%</span>
+                    </div>
+                    <div class="w-full rounded-full" style="background: #e5e7eb; height: 12px;">
+                        <div id="candle-progress-bar" class="rounded-full" style="width: 0%; height: 12px; background: linear-gradient(90deg, #3ecf8e, #1dd1a1); transition: width 0.3s ease;"></div>
+                    </div>
+                </div>
+
+                <!-- Stat cards -->
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+                    <div class="card-minimal p-3 text-center">
+                        <div class="text-xl font-bold" style="color: #3ecf8e;"><span id="stat-inst-done">0</span>/<span id="stat-inst-total">0</span></div>
+                        <div class="text-xs text-gray-500">Instruments</div>
+                    </div>
+                    <div class="card-minimal p-3 text-center">
+                        <div class="text-xl font-bold" style="color: #3ecf8e;" id="stat-candles">0</div>
+                        <div class="text-xs text-gray-500">Candles</div>
+                    </div>
+                    <div class="card-minimal p-3 text-center">
+                        <div class="text-xl font-bold" style="color: #ef4444;" id="stat-errors">0</div>
+                        <div class="text-xs text-gray-500">Errors</div>
+                    </div>
+                    <div class="card-minimal p-3 text-center">
+                        <div class="text-xl font-bold" style="color: #f59e0b;" id="stat-skipped">0</div>
+                        <div class="text-xs text-gray-500">Skipped</div>
+                    </div>
+                </div>
+
+                <!-- Per-instrument progress bars -->
+                <div id="instrument-bars" class="space-y-2 max-h-64 overflow-y-auto pr-1" style="scrollbar-width: thin;">
+                </div>
+
+                <!-- Current action -->
+                <div class="mt-3 text-xs text-gray-500" id="progress-current-action">Initializing...</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-4 gap-6">
+        <!-- Left Panel: Segments -->
+        <div class="lg:col-span-1">
+            <div class="card-minimal p-4">
+                <h3 class="font-semibold mb-3">Segments</h3>
+                <div id="segments-list" class="space-y-1">
+                    <div class="text-sm text-gray-400">Loading...</div>
+                </div>
+            </div>
+
+            <!-- Watchlists -->
+            <div class="card-minimal p-4 mt-4">
+                <div class="flex items-center justify-between mb-3">
+                    <h3 class="font-semibold">Watchlists</h3>
+                    <button onclick="createWatchlist()" class="btn btn-xs btn-ghost text-green-600">+ New</button>
+                </div>
+                <div id="watchlists-list" class="space-y-1">
+                    <div class="text-sm text-gray-400">No watchlists yet</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right Panel: Search & Browse -->
+        <div class="lg:col-span-3">
+            <!-- Search Bar -->
+            <div class="card-minimal p-4 mb-4">
+                <div class="flex gap-2">
+                    <input type="text" id="search-input" placeholder="Search by symbol or name..."
+                           class="input input-bordered flex-1" onkeyup="debounceSearch()">
+                    <select id="filter-type" class="select select-bordered w-32" onchange="doSearch()">
+                        <option value="">All Types</option>
+                    </select>
+                    <button onclick="doSearch()" class="btn btn-supabase">Search</button>
+                </div>
+            </div>
+
+            <!-- Candle Collection Panel -->
+            <div id="collect-panel" class="card-minimal p-4 mb-4 hidden">
+                <h3 class="font-semibold mb-3">Collect Historical Candles</h3>
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
+                    <div>
+                        <label class="label label-text text-xs">Interval</label>
+                        <select id="collect-interval" class="select select-bordered select-sm w-full">
+                            <option value="1day">1 Day</option>
+                            <option value="1hour">1 Hour</option>
+                            <option value="30minute">30 Min</option>
+                            <option value="15minute">15 Min</option>
+                            <option value="5minute">5 Min</option>
+                            <option value="1minute">1 Min</option>
+                            <option value="1week">1 Week</option>
+                            <option value="1month">1 Month</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="label label-text text-xs">From Date</label>
+                        <input type="date" id="collect-from" class="input input-bordered input-sm w-full">
+                    </div>
+                    <div>
+                        <label class="label label-text text-xs">To Date</label>
+                        <input type="date" id="collect-to" class="input input-bordered input-sm w-full">
+                    </div>
+                    <div class="flex items-end">
+                        <button id="btn-start-collection" onclick="startCandleCollection()" class="btn btn-supabase btn-sm w-full">
+                            Start Collection
+                        </button>
+                    </div>
+                </div>
+                <div class="flex items-center justify-between mt-1">
+                    <div class="text-xs text-gray-500 flex items-center gap-2">
+                        Selected: <span id="selected-count" class="font-semibold">0</span> instruments
+                        <button onclick="selectAllMatching()" class="btn btn-xs btn-outline btn-success">Select All Matching</button>
+                        <button onclick="clearSelection()" class="btn btn-xs btn-outline btn-ghost">Clear</button>
+                        <span id="incremental-info" class="ml-2 hidden"></span>
+                    </div>
+                    <label class="flex items-center gap-2 cursor-pointer">
+                        <input type="checkbox" id="collect-incremental" class="checkbox checkbox-sm checkbox-success" checked>
+                        <span class="text-xs">Incremental (resume from last collection)</span>
+                    </label>
+                </div>
+            </div>
+
+            <!-- Results Table -->
+            <div class="card-minimal overflow-x-auto">
+                <table class="table table-sm w-full">
+                    <thead>
+                        <tr class="border-b">
+                            <th><input type="checkbox" id="select-all" class="checkbox checkbox-sm checkbox-success" onchange="toggleSelectAll()"></th>
+                            <th>Symbol</th>
+                            <th>Name</th>
+                            <th>Segment</th>
+                            <th>Type</th>
+                            <th>Exchange</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="instruments-table">
+                        <tr><td colspan="7" class="text-center text-gray-400 py-8">Select a segment or search for instruments</td></tr>
+                    </tbody>
+                </table>
+                <!-- Pagination -->
+                <div id="pagination" class="flex justify-between items-center p-4 hidden">
+                    <span class="text-sm text-gray-500" id="page-info">Showing 0 of 0</span>
+                    <div class="btn-group">
+                        <button onclick="prevPage()" class="btn btn-sm" id="btn-prev" disabled>Prev</button>
+                        <button onclick="nextPage()" class="btn btn-sm" id="btn-next" disabled>Next</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Analytics Section -->
+            <div id="analytics-section" class="mt-6 hidden">
+                <h3 class="font-semibold text-lg mb-4">Collection Analytics</h3>
+
+                <!-- Summary Cards -->
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                    <div class="card-minimal p-4 text-center">
+                        <div class="text-2xl font-bold supabase-text-gradient" id="analytics-total-candles">--</div>
+                        <div class="text-sm text-gray-500">Total Candles</div>
+                    </div>
+                    <div class="card-minimal p-4 text-center">
+                        <div class="text-2xl font-bold supabase-text-gradient" id="analytics-instruments">--</div>
+                        <div class="text-sm text-gray-500">Instruments with Data</div>
+                    </div>
+                    <div class="card-minimal p-4 text-center">
+                        <div class="text-2xl font-bold supabase-text-gradient" id="analytics-date-range">--</div>
+                        <div class="text-sm text-gray-500">Date Coverage</div>
+                    </div>
+                </div>
+
+                <!-- Collection Status Table -->
+                <div class="card-minimal overflow-x-auto">
+                    <table class="table table-sm w-full">
+                        <thead>
+                            <tr class="border-b">
+                                <th>Symbol</th>
+                                <th>Segment</th>
+                                <th>Interval</th>
+                                <th>Candles</th>
+                                <th>Date Range</th>
+                                <th>Last Collected</th>
+                            </tr>
+                        </thead>
+                        <tbody id="analytics-table">
+                            <tr><td colspan="6" class="text-center text-gray-400 py-4">Loading analytics...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+let currentSegment = null;
+let currentOffset = 0;
+let currentTotal = 0;
+const PAGE_SIZE = 100;
+let selectedKeys = new Set();
+let searchTimeout = null;
+let activeCandleTaskId = null;
+let candlePollInterval = null;
+
+// XSS escaping helpers
+function escHtml(s) { if (!s) return ''; var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+function escAttr(s) { if (!s) return ''; return String(s).replace(/&/g,'&amp;').replace(/'/g,'&#39;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+// Initialize
+document.addEventListener('DOMContentLoaded', () => {
+    loadSegments();
+    loadWatchlists();
+    loadAnalytics();
+    checkActiveCandleTasks();
+    // Set default dates
+    const today = new Date().toISOString().split('T')[0];
+    const yearAgo = new Date(Date.now() - 365*24*60*60*1000).toISOString().split('T')[0];
+    document.getElementById('collect-from').value = yearAgo;
+    document.getElementById('collect-to').value = today;
+});
+
+async function loadSegments() {
+    try {
+        const res = await fetch('/api/instruments/master/segments');
+        const data = await res.json();
+        if (data.error) return;
+
+        document.getElementById('stat-total').textContent = (data.total || 0).toLocaleString();
+        document.getElementById('stat-segments').textContent = (data.segments || []).length;
+        document.getElementById('stat-last-sync').textContent = data.last_sync
+            ? new Date(data.last_sync).toLocaleDateString() : 'Never';
+
+        const list = document.getElementById('segments-list');
+        if (!data.segments || data.segments.length === 0) {
+            list.innerHTML = '<div class="text-sm text-gray-400">No data. Click "Sync Master Data" to download.</div>';
+            return;
+        }
+
+        list.innerHTML = data.segments.map(s => `
+            <button onclick="selectSegment('${escAttr(s.segment)}')"
+                    class="w-full text-left px-3 py-2 rounded-lg text-sm hover:bg-green-50 transition segment-btn"
+                    data-segment="${escAttr(s.segment)}">
+                <div class="font-medium">${escHtml(s.segment)}</div>
+                <div class="text-xs text-gray-400">${s.count.toLocaleString()} instruments</div>
+            </button>
+        `).join('');
+    } catch (e) {
+        console.error('Failed to load segments:', e);
+    }
+}
+
+async function loadWatchlists() {
+    try {
+        const res = await fetch('/api/watchlists');
+        const data = await res.json();
+        const list = document.getElementById('watchlists-list');
+        document.getElementById('stat-watchlists').textContent = (data.watchlists || []).length;
+
+        if (!data.watchlists || data.watchlists.length === 0) {
+            list.innerHTML = '<div class="text-sm text-gray-400">No watchlists yet</div>';
+            return;
+        }
+
+        list.innerHTML = data.watchlists.map(w => `
+            <div class="flex items-center justify-between px-3 py-2 rounded-lg hover:bg-green-50 text-sm">
+                <button onclick="loadWatchlistItems(${parseInt(w.id)})" class="text-left flex-1">
+                    <div class="font-medium">${escHtml(w.name)}</div>
+                    <div class="text-xs text-gray-400">${parseInt(w.item_count)} items</div>
+                </button>
+                <button onclick="deleteWatchlist(${parseInt(w.id)})" class="btn btn-ghost btn-xs text-red-400">x</button>
+            </div>
+        `).join('');
+    } catch (e) {
+        console.error('Failed to load watchlists:', e);
+    }
+}
+
+function selectSegment(segment) {
+    currentSegment = segment;
+    currentOffset = 0;
+    document.querySelectorAll('.segment-btn').forEach(b => b.classList.remove('bg-green-50', 'font-semibold'));
+    const btn = document.querySelector(`[data-segment="${segment}"]`);
+    if (btn) btn.classList.add('bg-green-50', 'font-semibold');
+    loadTypesForSegment(segment);
+    browseSegment();
+}
+
+async function loadTypesForSegment(segment) {
+    const select = document.getElementById('filter-type');
+    select.innerHTML = '<option value="">All Types</option>';
+    try {
+        const res = await fetch(`/api/instruments/master/types?segment=${segment}`);
+        const data = await res.json();
+        (data.types || []).forEach(t => {
+            const opt = document.createElement('option');
+            opt.value = t;
+            opt.textContent = t;
+            select.appendChild(opt);
+        });
+    } catch (e) {
+        console.error('Failed to load types:', e);
+    }
+}
+
+async function selectAllMatching() {
+    if (!currentSegment) { showToast('Select a segment first', 'warning'); return; }
+    const type = document.getElementById('filter-type').value;
+    const params = new URLSearchParams({ segment: currentSegment });
+    if (type) params.set('type', type);
+    try {
+        const res = await fetch(`/api/instruments/master/keys?${params}`);
+        const data = await res.json();
+        if (data.keys) {
+            data.keys.forEach(k => selectedKeys.add(k));
+            document.querySelectorAll('.inst-check').forEach(cb => {
+                if (selectedKeys.has(cb.value)) cb.checked = true;
+            });
+            updateSelectedUI();
+            showToast(`Selected ${data.count} instruments`, 'success');
+        }
+    } catch (e) {
+        showToast('Failed to select all: ' + e.message, 'error');
+    }
+}
+
+function clearSelection() {
+    selectedKeys.clear();
+    document.querySelectorAll('.inst-check').forEach(cb => cb.checked = false);
+    document.getElementById('select-all').checked = false;
+    updateSelectedUI();
+}
+
+async function browseSegment() {
+    if (!currentSegment) return;
+    const type = document.getElementById('filter-type').value;
+    try {
+        const params = new URLSearchParams({
+            segment: currentSegment,
+            limit: PAGE_SIZE,
+            offset: currentOffset
+        });
+        if (type) params.set('type', type);
+
+        const res = await fetch(`/api/instruments/master/browse?${params}`);
+        const data = await res.json();
+        currentTotal = data.total || 0;
+        renderTable(data.instruments || []);
+        updatePagination();
+    } catch (e) {
+        console.error('Browse failed:', e);
+    }
+}
+
+function debounceSearch() {
+    clearTimeout(searchTimeout);
+    searchTimeout = setTimeout(doSearch, 300);
+}
+
+async function doSearch() {
+    const query = document.getElementById('search-input').value.trim();
+    const type = document.getElementById('filter-type').value;
+
+    if (!query && !currentSegment) return;
+
+    if (query) {
+        const params = new URLSearchParams({ q: query, limit: 200 });
+        if (currentSegment) params.set('segment', currentSegment);
+        if (type) params.set('type', type);
+
+        try {
+            const res = await fetch(`/api/instruments/master/search?${params}`);
+            const data = await res.json();
+            currentTotal = data.count || 0;
+            currentOffset = 0;
+            renderTable(data.instruments || []);
+            document.getElementById('pagination').classList.add('hidden');
+        } catch (e) {
+            console.error('Search failed:', e);
+        }
+    } else {
+        browseSegment();
+    }
+}
+
+function renderTable(instruments) {
+    const tbody = document.getElementById('instruments-table');
+    if (!instruments.length) {
+        tbody.innerHTML = '<tr><td colspan="7" class="text-center text-gray-400 py-8">No instruments found</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = instruments.map(i => `
+        <tr class="hover">
+            <td><input type="checkbox" class="checkbox checkbox-sm checkbox-success inst-check"
+                       value="${escAttr(i.instrument_key)}" ${selectedKeys.has(i.instrument_key) ? 'checked' : ''}
+                       onchange="toggleSelect(this)"></td>
+            <td class="font-mono text-sm font-semibold">${escHtml(i.trading_symbol)}</td>
+            <td class="text-sm">${escHtml(i.name)}</td>
+            <td><span class="badge badge-sm badge-outline">${escHtml(i.segment)}</span></td>
+            <td><span class="badge badge-sm ${typeColor(i.instrument_type)}">${escHtml(i.instrument_type)}</span></td>
+            <td class="text-sm">${escHtml(i.exchange)}</td>
+            <td>
+                <button onclick="addToWatchlistPrompt('${escAttr(i.instrument_key)}')" class="btn btn-ghost btn-xs" title="Add to watchlist">
+                    +WL
+                </button>
+            </td>
+        </tr>
+    `).join('');
+}
+
+function typeColor(t) {
+    const m = { EQ: 'badge-success', FUT: 'badge-warning', CE: 'badge-info', PE: 'badge-error', INDEX: 'badge-primary' };
+    return m[t] || 'badge-ghost';
+}
+
+function toggleSelect(cb) {
+    if (cb.checked) selectedKeys.add(cb.value);
+    else selectedKeys.delete(cb.value);
+    updateSelectedUI();
+}
+
+function toggleSelectAll() {
+    const checked = document.getElementById('select-all').checked;
+    document.querySelectorAll('.inst-check').forEach(cb => {
+        cb.checked = checked;
+        if (checked) selectedKeys.add(cb.value);
+        else selectedKeys.delete(cb.value);
+    });
+    updateSelectedUI();
+}
+
+function updateSelectedUI() {
+    document.getElementById('selected-count').textContent = selectedKeys.size;
+    document.getElementById('collect-panel').classList.toggle('hidden', selectedKeys.size === 0);
+    if (selectedKeys.size > 0) {
+        fetchIncrementalInfo();
+    } else {
+        document.getElementById('incremental-info').classList.add('hidden');
+    }
+}
+
+async function fetchIncrementalInfo() {
+    const infoEl = document.getElementById('incremental-info');
+    try {
+        const res = await fetch('/api/candles/analytics');
+        const data = await res.json();
+        if (data.error || !data.instruments) { infoEl.classList.add('hidden'); return; }
+
+        const collected = new Set(data.instruments.map(i => i.instrument_key));
+        const selectedArr = Array.from(selectedKeys);
+        const withData = selectedArr.filter(k => collected.has(k));
+
+        if (withData.length > 0) {
+            const dates = data.instruments
+                .filter(i => selectedKeys.has(i.instrument_key) && i.last_collected_date)
+                .map(i => new Date(i.last_collected_date));
+            const latest = dates.length > 0 ? new Date(Math.max(...dates)).toLocaleDateString() : '';
+            infoEl.textContent = `${withData.length} of ${selectedArr.length} have existing data${latest ? ' (latest: ' + latest + ')' : ''}`;
+            infoEl.classList.remove('hidden');
+            infoEl.style.color = '#3ecf8e';
+        } else {
+            infoEl.classList.add('hidden');
+        }
+    } catch (e) {
+        infoEl.classList.add('hidden');
+    }
+}
+
+function updatePagination() {
+    const pag = document.getElementById('pagination');
+    pag.classList.remove('hidden');
+    document.getElementById('page-info').textContent =
+        `Showing ${currentOffset + 1}-${Math.min(currentOffset + PAGE_SIZE, currentTotal)} of ${currentTotal.toLocaleString()}`;
+    document.getElementById('btn-prev').disabled = currentOffset === 0;
+    document.getElementById('btn-next').disabled = currentOffset + PAGE_SIZE >= currentTotal;
+}
+
+function nextPage() { currentOffset += PAGE_SIZE; browseSegment(); }
+function prevPage() { currentOffset = Math.max(0, currentOffset - PAGE_SIZE); browseSegment(); }
+
+// Sync Master Data
+async function syncMaster() {
+    const btn = document.getElementById('btn-sync');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="loading loading-spinner loading-xs"></span> Syncing...';
+
+    const statusDiv = document.getElementById('sync-status');
+    statusDiv.classList.remove('hidden');
+
+    try {
+        const res = await fetch('/api/instruments/master/sync', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}' });
+        const data = await res.json();
+
+        if (data.task_id) {
+            pollSyncStatus(data.task_id);
+        }
+    } catch (e) {
+        document.getElementById('sync-message').textContent = 'Sync failed: ' + e.message;
+        btn.disabled = false;
+        btn.innerHTML = 'Sync Master Data';
+    }
+}
+
+async function pollSyncStatus(tid) {
+    async function fetchStatus() {
+        try {
+            const res = await fetch(`/api/export/status/${tid}`);
+            const data = await res.json();
+            document.getElementById('sync-message').textContent = data.status_message || 'Processing...';
+            if (data.status === 'completed' || data.status === 'failed') {
+                clearInterval(interval);
+                const btn = document.getElementById('btn-sync');
+                btn.disabled = false;
+                btn.innerHTML = 'Sync Master Data';
+                if (data.status === 'completed') {
+                    setTimeout(() => {
+                        document.getElementById('sync-status').classList.add('hidden');
+                        loadSegments();
+                    }, 2000);
+                }
+            }
+        } catch (e) { clearInterval(interval); }
+    }
+    if (window._sseSource) {
+        function onSSE(e) {
+            try { var d = JSON.parse(e.data); if (d.task_id === tid) fetchStatus(); } catch(err) {}
+        }
+        window._sseSource.addEventListener('task:update', onSSE);
+        window._sseSource.addEventListener('task:completed', onSSE);
+        window._sseSource.addEventListener('task:failed', onSSE);
+    }
+    const interval = setInterval(fetchStatus, window._sseSource ? 5000 : 2000);
+}
+
+// Watchlist Management
+async function createWatchlist() {
+    const name = prompt('Watchlist name:');
+    if (!name) return;
+    await fetch('/api/watchlists', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ name, segment: currentSegment })
+    });
+    loadWatchlists();
+}
+
+async function addToWatchlistPrompt(key) {
+    const res = await fetch('/api/watchlists');
+    const data = await res.json();
+    if (!data.watchlists || !data.watchlists.length) {
+        showToast('Create a watchlist first.', 'warning');
+        return;
+    }
+    const names = data.watchlists.map((w, i) => `${i+1}. ${w.name}`).join('\n');
+    const choice = prompt(`Add to watchlist:\n${names}\n\nEnter number:`);
+    if (!choice) return;
+    const idx = parseInt(choice) - 1;
+    if (idx >= 0 && idx < data.watchlists.length) {
+        await fetch(`/api/watchlists/${data.watchlists[idx].id}/items`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ instrument_keys: [key] })
+        });
+        loadWatchlists();
+    }
+}
+
+async function loadWatchlistItems(wlId) {
+    const res = await fetch(`/api/watchlists/${wlId}`);
+    const data = await res.json();
+    if (data.items) {
+        selectedKeys.clear();
+        data.items.forEach(i => selectedKeys.add(i.instrument_key));
+        renderTable(data.items);
+        updateSelectedUI();
+        currentSegment = null;
+        document.querySelectorAll('.segment-btn').forEach(b => b.classList.remove('bg-green-50', 'font-semibold'));
+        document.getElementById('pagination').classList.add('hidden');
+    }
+}
+
+async function deleteWatchlist(wlId) {
+    if (!confirm('Delete this watchlist?')) return;
+    await fetch(`/api/watchlists/${wlId}`, { method: 'DELETE' });
+    loadWatchlists();
+}
+
+// ── Candle Collection with Rich Progress ─────────────────
+
+async function startCandleCollection() {
+    if (selectedKeys.size === 0) return;
+
+    const interval = document.getElementById('collect-interval').value;
+    const fromDate = document.getElementById('collect-from').value;
+    const toDate = document.getElementById('collect-to').value;
+    const incremental = document.getElementById('collect-incremental').checked;
+
+    const btn = document.getElementById('btn-start-collection');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="loading loading-spinner loading-xs"></span> Starting...';
+
+    try {
+        const res = await fetch('/api/candles/collect', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                instrument_keys: Array.from(selectedKeys),
+                interval: interval,
+                from_date: fromDate || null,
+                to_date: toDate || null,
+                batch_size: 5,
+                incremental: incremental
+            })
+        });
+        const data = await res.json();
+        if (data.error) {
+            showToast('Failed to start collection: ' + data.error, 'error');
+            btn.disabled = false;
+            btn.innerHTML = 'Start Collection';
+            return;
+        }
+        if (data.task_id) {
+            activeCandleTaskId = data.task_id;
+            showProgressPanel();
+            startPolling(data.task_id);
+            showToast('Candle collection started', 'success');
+        }
+    } catch (e) {
+        showToast('Failed to start collection: ' + e.message, 'error');
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = 'Start Collection';
+    }
+}
+
+function showProgressPanel() {
+    const panel = document.getElementById('candle-progress-panel');
+    panel.classList.remove('hidden');
+    document.getElementById('progress-actions').classList.add('hidden');
+    panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function dismissProgress() {
+    document.getElementById('candle-progress-panel').classList.add('hidden');
+    activeCandleTaskId = null;
+    if (candlePollInterval) {
+        clearInterval(candlePollInterval);
+        candlePollInterval = null;
+    }
+}
+
+function startNewCandleCollection() {
+    dismissProgress();
+    // Scroll to the collect panel
+    const panel = document.getElementById('collect-panel');
+    if (!panel.classList.contains('hidden')) {
+        panel.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+}
+
+function startPolling(tid) {
+    if (candlePollInterval) clearInterval(candlePollInterval);
+
+    async function fetchCandleStatus() {
+        try {
+            const res = await fetch(`/api/candles/status/${tid}`);
+            const data = await res.json();
+            if (data.error) {
+                clearInterval(candlePollInterval);
+                candlePollInterval = null;
+                return;
+            }
+            updateProgressUI(data);
+            if (data.status === 'completed' || data.status === 'failed') {
+                clearInterval(candlePollInterval);
+                candlePollInterval = null;
+                activeCandleTaskId = null;
+                onCollectionComplete(data);
+            }
+        } catch (e) {
+            console.error('Poll error:', e);
+        }
+    }
+    if (window._sseSource) {
+        function onSSE(e) {
+            try { var d = JSON.parse(e.data); if (d.task_id === tid) fetchCandleStatus(); } catch(err) {}
+        }
+        window._sseSource.addEventListener('task:update', onSSE);
+        window._sseSource.addEventListener('task:completed', onSSE);
+        window._sseSource.addEventListener('task:failed', onSSE);
+    }
+    candlePollInterval = setInterval(fetchCandleStatus, window._sseSource ? 5000 : 1000);
+}
+
+function updateProgressUI(data) {
+    const pct = data.progress || 0;
+    document.getElementById('candle-progress-bar').style.width = pct + '%';
+    document.getElementById('progress-pct').textContent = pct + '%';
+    document.getElementById('progress-label').textContent =
+        data.status === 'completed' ? 'Complete' :
+        data.status === 'failed' ? 'Failed' :
+        `Processing ${data.processed || 0} of ${data.total || 0}`;
+
+    // Stat cards
+    document.getElementById('stat-inst-done').textContent = data.processed || 0;
+    document.getElementById('stat-inst-total').textContent = data.total || 0;
+    document.getElementById('stat-candles').textContent = (data.candles_fetched || 0).toLocaleString();
+    document.getElementById('stat-errors').textContent = data.errors || 0;
+    document.getElementById('stat-skipped').textContent = data.skipped || 0;
+
+    // Current action
+    if (data.current_instrument && data.status === 'processing') {
+        document.getElementById('progress-current-action').textContent = 'Currently processing: ' + data.current_instrument;
+    }
+
+    // Per-instrument bars
+    renderInstrumentBars(data.instrument_progress || {});
+}
+
+function renderInstrumentBars(instrumentProgress) {
+    const container = document.getElementById('instrument-bars');
+    const keys = Object.keys(instrumentProgress);
+    if (keys.length === 0) return;
+
+    container.innerHTML = keys.map(key => {
+        const info = instrumentProgress[key];
+        const shortKey = key.split('|').pop() || key;
+        let barColor, statusText, barWidth;
+
+        if (info.status === 'completed') {
+            barColor = '#22c55e';
+            statusText = info.candles + ' candles';
+            barWidth = '100%';
+        } else if (info.status === 'failed') {
+            barColor = '#ef4444';
+            statusText = 'Failed';
+            barWidth = '100%';
+        } else if (info.status === 'skipped') {
+            barColor = '#f59e0b';
+            statusText = 'Skipped';
+            barWidth = '100%';
+        } else {
+            barColor = '#d1d5db';
+            statusText = 'Pending';
+            barWidth = '0%';
+        }
+
+        return `<div class="flex items-center gap-2 text-xs">
+            <div class="w-32 truncate font-mono" title="${escAttr(key)}">${escHtml(shortKey)}</div>
+            <div class="flex-1 rounded-full" style="background: #e5e7eb; height: 6px;">
+                <div class="rounded-full" style="width: ${barWidth}; height: 6px; background: ${barColor}; transition: width 0.3s ease;"></div>
+            </div>
+            <div class="w-20 text-right" style="color: ${barColor};">${statusText}</div>
+        </div>`;
+    }).join('');
+}
+
+function onCollectionComplete(data) {
+    document.getElementById('progress-actions').classList.remove('hidden');
+    document.getElementById('progress-actions').style.display = 'flex';
+
+    if (data.status === 'completed') {
+        document.getElementById('progress-current-action').textContent =
+            `Collection completed: ${(data.candles_fetched || 0).toLocaleString()} candles fetched, ${data.errors || 0} errors, ${data.skipped || 0} skipped`;
+        showToast(`Collection complete: ${(data.candles_fetched || 0).toLocaleString()} candles`, 'success');
+        // Refresh analytics
+        loadAnalytics();
+    } else {
+        document.getElementById('progress-current-action').textContent =
+            'Collection failed: ' + (data.status_message || data.error || 'Unknown error');
+        showToast('Collection failed: ' + (data.status_message || 'Unknown error'), 'error');
+    }
+}
+
+// ── Page-reload recovery ─────────────────────────────────
+
+async function checkActiveCandleTasks() {
+    try {
+        const res = await fetch('/api/candles/tasks');
+        const data = await res.json();
+        if (data.tasks && data.tasks.length > 0) {
+            const task = data.tasks[0];
+            activeCandleTaskId = task.task_id;
+            showProgressPanel();
+            updateProgressUI(task);
+            startPolling(task.task_id);
+        }
+    } catch (e) {
+        console.error('Failed to check active tasks:', e);
+    }
+}
+
+// ── Analytics ────────────────────────────────────────────
+
+async function loadAnalytics() {
+    try {
+        const res = await fetch('/api/candles/analytics');
+        const data = await res.json();
+
+        if (data.error) return;
+
+        const section = document.getElementById('analytics-section');
+        const totalCandles = data.total_candles || 0;
+
+        if (totalCandles === 0 && (!data.instruments || data.instruments.length === 0)) {
+            section.classList.add('hidden');
+            return;
+        }
+
+        section.classList.remove('hidden');
+
+        document.getElementById('analytics-total-candles').textContent = totalCandles.toLocaleString();
+        document.getElementById('analytics-instruments').textContent = data.instruments_with_data || 0;
+
+        if (data.earliest_date && data.latest_date) {
+            const earliest = new Date(data.earliest_date).toLocaleDateString();
+            const latest = new Date(data.latest_date).toLocaleDateString();
+            document.getElementById('analytics-date-range').textContent = earliest + ' - ' + latest;
+        } else {
+            document.getElementById('analytics-date-range').textContent = '--';
+        }
+
+        renderAnalyticsTable(data.instruments || []);
+    } catch (e) {
+        console.error('Failed to load analytics:', e);
+    }
+}
+
+function renderAnalyticsTable(instruments) {
+    const tbody = document.getElementById('analytics-table');
+    if (!instruments.length) {
+        tbody.innerHTML = '<tr><td colspan="6" class="text-center text-gray-400 py-4">No collection data yet</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = instruments.map(i => {
+        const dateRange = (i.earliest_date && i.last_collected_date)
+            ? new Date(i.earliest_date).toLocaleDateString() + ' - ' + new Date(i.last_collected_date).toLocaleDateString()
+            : '--';
+        const lastCollected = i.updated_at ? timeAgo(i.updated_at) : '--';
+        const isStale = i.updated_at && (Date.now() - new Date(i.updated_at).getTime()) > 7 * 24 * 60 * 60 * 1000;
+
+        return `<tr class="hover">
+            <td class="font-mono text-sm font-semibold">${escHtml(i.trading_symbol || i.instrument_key)}</td>
+            <td><span class="badge badge-sm badge-outline">${escHtml(i.segment)}</span></td>
+            <td class="text-sm">${escHtml(i.interval)}</td>
+            <td class="text-sm font-semibold">${(i.candle_count || 0).toLocaleString()}</td>
+            <td class="text-xs">${dateRange}</td>
+            <td class="text-xs">
+                ${lastCollected}
+                ${isStale ? '<span class="badge badge-xs badge-warning ml-1">stale</span>' : ''}
+            </td>
+        </tr>`;
+    }).join('');
+}
+
+function timeAgo(dateStr) {
+    const now = Date.now();
+    const then = new Date(dateStr).getTime();
+    const diff = now - then;
+    const mins = Math.floor(diff / 60000);
+    if (mins < 1) return 'just now';
+    if (mins < 60) return mins + 'm ago';
+    const hours = Math.floor(mins / 60);
+    if (hours < 24) return hours + 'h ago';
+    const days = Math.floor(hours / 24);
+    if (days < 30) return days + 'd ago';
+    return new Date(dateStr).toLocaleDateString();
+}
+</script>
+{% endblock %}

@@ -413,23 +413,17 @@ async function startExport() {
     }
 }
 
-async function pollExportProgress(taskId) {
-    const interval = setInterval(async () => {
+async function pollExportProgress(tid) {
+    async function fetchStatus() {
         try {
-            const response = await fetch(`/api/export/status/${taskId}`);
+            const response = await fetch(`/api/export/status/${tid}`);
             const data = await response.json();
-
-            // Update progress bar
             document.getElementById('export-progress-bar').style.width = `${data.progress}%`;
-
-            // Update status
             document.getElementById('export-status').textContent = data.status_message || 'Processing...';
-
-            // Check if completed
             if (data.status === 'completed') {
                 clearInterval(interval);
                 document.getElementById('download-section').classList.remove('hidden');
-                document.getElementById('download-link').href = `/api/export/download/${taskId}`;
+                document.getElementById('download-link').href = `/api/export/download/${tid}`;
                 document.getElementById('export-status').textContent = 'Export completed successfully!';
             } else if (data.status === 'failed') {
                 clearInterval(interval);
@@ -438,7 +432,17 @@ async function pollExportProgress(taskId) {
         } catch (error) {
             console.error('Error checking export status:', error);
         }
-    }, 1000);
+    }
+    // SSE-driven with polling fallback
+    if (window._sseSource) {
+        function onSSE(e) {
+            try { var d = JSON.parse(e.data); if (d.task_id === tid) fetchStatus(); } catch(err) {}
+        }
+        window._sseSource.addEventListener('task:update', onSSE);
+        window._sseSource.addEventListener('task:completed', onSSE);
+        window._sseSource.addEventListener('task:failed', onSSE);
+    }
+    const interval = setInterval(fetchStatus, window._sseSource ? 5000 : 1000);
 }
 
 // Initialize

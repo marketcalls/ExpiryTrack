@@ -39,20 +39,35 @@
     <div id="step1" class="step-content">
         <div class="card-minimal">
             <div class="p-8">
-                <h2 class="text-xl font-semibold mb-6">Step 1: Select Instruments</h2>
-                <p class="text-gray-600 mb-6">Choose the instruments you want to collect expired contract data for:</p>
+                <h2 class="text-xl font-semibold mb-4">Step 1: Select Instruments</h2>
+                <p class="text-gray-600 mb-4">Choose the instruments you want to collect expired contract data for:</p>
+
+                <!-- Search Filter -->
+                <div class="mb-4">
+                    <input type="text" id="instrument-search" placeholder="Search instruments..."
+                           class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-green-500"
+                           oninput="filterInstruments()" />
+                </div>
 
                 <div id="instruments-container" class="space-y-4">
                     <div class="text-center text-gray-400 py-4">Loading instruments...</div>
                 </div>
 
                 <div class="flex justify-between items-center mt-8">
-                    <button type="button" class="btn bg-gray-100 text-gray-700 hover:bg-gray-200 font-medium py-2 px-4 rounded-lg" onclick="selectAll()">
-                        Select All
-                    </button>
-                    <button type="button" class="btn-supabase" onclick="nextStep(1)" id="next1" disabled>
-                        Next Step
-                    </button>
+                    <div class="flex gap-2">
+                        <button type="button" class="btn bg-gray-100 text-gray-700 hover:bg-gray-200 font-medium py-2 px-4 rounded-lg text-sm" onclick="selectAll()">
+                            Select All
+                        </button>
+                        <button type="button" class="btn bg-gray-100 text-gray-700 hover:bg-gray-200 font-medium py-2 px-4 rounded-lg text-sm" onclick="deselectAll()">
+                            Deselect All
+                        </button>
+                    </div>
+                    <div class="flex items-center gap-3">
+                        <span id="selection-count" class="text-sm text-gray-500"></span>
+                        <button type="button" class="btn-supabase" onclick="nextStep(1)" id="next1" disabled>
+                            Next Step
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -209,7 +224,7 @@
 
                         <!-- Completion Actions -->
                         <div id="completion-actions" class="hidden mt-4 text-center">
-                            <button onclick="window.location.href='{{ url_for('status_page') }}'" class="btn-supabase mr-4">
+                            <button onclick="window.location.href='{{ url_for('status.status_page') }}'" class="btn-supabase mr-4">
                                 View Status
                             </button>
                             <button onclick="startNewCollection()" class="btn bg-gray-100 text-gray-700 hover:bg-gray-200 font-medium py-2 px-4 rounded-lg">
@@ -267,6 +282,10 @@
 </div>
 
 <script>
+// XSS escaping helpers
+function escHtml(s) { if (!s) return ''; var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+function escAttr(s) { if (!s) return ''; return String(s).replace(/&/g,'&amp;').replace(/'/g,'&#39;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
 // Wizard State
 let currentStep = 1;
 let selectedInstruments = [];
@@ -281,31 +300,129 @@ document.addEventListener('DOMContentLoaded', function() {
     setupWorkerSlider();
 });
 
-// Load instruments from API (#9)
+// Load instruments from API (#9) — grouped by category
+let allWizardInstruments = [];
+
 async function loadInstrumentsForWizard() {
     try {
         const res = await fetch('/api/instruments');
         const data = await res.json();
         const container = document.getElementById('instruments-container');
-        const instruments = (data.instruments || []).filter(i => i.is_active);
-        if (instruments.length === 0) {
+        allWizardInstruments = (data.instruments || []).filter(i => i.is_active);
+        if (allWizardInstruments.length === 0) {
             container.innerHTML = '<div class="text-center text-gray-400 py-4">No active instruments. Add some in Settings.</div>';
             return;
         }
-        container.innerHTML = instruments.map((inst, idx) => `
-            <div class="flex items-center p-4 border border-gray-200 rounded-lg hover:border-green-300 cursor-pointer">
-                <input type="checkbox" id="inst_${idx}" name="instruments" value="${inst.instrument_key}" class="mr-4">
-                <label for="inst_${idx}" class="cursor-pointer flex-1">
-                    <div class="font-medium text-gray-900">${inst.symbol}</div>
-                    <div class="text-sm text-gray-600">${inst.instrument_key}</div>
-                </label>
-            </div>
-        `).join('');
+        renderGroupedInstruments(allWizardInstruments);
         updateInstrumentSelection();
     } catch (e) {
         document.getElementById('instruments-container').innerHTML =
             '<div class="text-red-500 text-center py-4">Failed to load instruments</div>';
     }
+}
+
+// Sanitize category name for use as CSS class suffix
+function catSlug(cat) {
+    return cat.replace(/[^a-zA-Z0-9]/g, '-').replace(/-+/g, '-');
+}
+
+function renderGroupedInstruments(instruments) {
+    const container = document.getElementById('instruments-container');
+    // Group by category
+    const grouped = {};
+    instruments.forEach(inst => {
+        const cat = inst.category || 'Index';
+        if (!grouped[cat]) grouped[cat] = [];
+        grouped[cat].push(inst);
+    });
+
+    const categoryConfig = {
+        'Index': { color: 'green', icon: '&#x1F4C8;', expanded: true },
+        'Stock F&O': { color: 'blue', icon: '&#x1F3E2;', expanded: false },
+        'Commodity': { color: 'amber', icon: '&#x26CF;', expanded: false },
+        'BSE F&O': { color: 'purple', icon: '&#x1F3ED;', expanded: false },
+    };
+
+    // Sort: Index first, then Stock F&O, Commodity, etc
+    const order = ['Index', 'Stock F&O', 'Commodity', 'BSE F&O'];
+    const sortedCats = Object.keys(grouped).sort((a, b) => {
+        const ia = order.indexOf(a), ib = order.indexOf(b);
+        return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+    });
+
+    container.innerHTML = sortedCats.map(cat => {
+        const cfg = categoryConfig[cat] || { color: 'gray', icon: '', expanded: false };
+        const slug = catSlug(cat);
+        const insts = grouped[cat];
+        const isExpanded = cfg.expanded || insts.length <= 10;
+        return `
+            <div class="border border-gray-200 rounded-lg overflow-hidden" data-category="${slug}">
+                <div class="flex items-center justify-between p-3 bg-${cfg.color}-50 cursor-pointer select-none"
+                     onclick="toggleCategory('${slug}')">
+                    <div class="flex items-center gap-2">
+                        <span class="text-sm">${cfg.icon}</span>
+                        <span class="font-semibold text-${cfg.color}-700 text-sm">${cat}</span>
+                        <span class="text-xs text-${cfg.color}-500">(${insts.length})</span>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <button type="button" class="text-xs text-${cfg.color}-600 hover:underline"
+                                onclick="event.stopPropagation(); selectCategory('${slug}')">Select All</button>
+                        <svg class="w-4 h-4 text-gray-500 transition-transform category-arrow-${slug}"
+                             style="${isExpanded ? 'transform:rotate(180deg)' : ''}"
+                             fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                        </svg>
+                    </div>
+                </div>
+                <div class="category-body-${slug} ${isExpanded ? '' : 'hidden'}">
+                    <div class="p-2 grid grid-cols-1 md:grid-cols-2 gap-1 max-h-64 overflow-y-auto">
+                        ${insts.map((inst, idx) => {
+                            const globalIdx = instruments.indexOf(inst);
+                            return `
+                            <div class="flex items-center p-2 border border-gray-100 rounded hover:border-${cfg.color}-300 cursor-pointer instrument-item"
+                                 data-symbol="${escAttr(inst.symbol.toLowerCase())}">
+                                <input type="checkbox" id="inst_${globalIdx}" name="instruments"
+                                       value="${escAttr(inst.instrument_key)}" class="mr-2"
+                                       data-category="${escAttr(slug)}">
+                                <label for="inst_${globalIdx}" class="cursor-pointer flex-1 text-sm">
+                                    <span class="font-medium text-gray-900">${escHtml(inst.symbol)}</span>
+                                </label>
+                            </div>`;
+                        }).join('')}
+                    </div>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+function toggleCategory(cat) {
+    const cls = 'category-body-' + catSlug(cat);
+    const arrowCls = 'category-arrow-' + catSlug(cat);
+    document.querySelectorAll('.' + cls).forEach(el => el.classList.toggle('hidden'));
+    document.querySelectorAll('.' + arrowCls).forEach(el => {
+        el.style.transform = el.style.transform === 'rotate(180deg)' ? '' : 'rotate(180deg)';
+    });
+}
+
+function selectCategory(slug) {
+    const checkboxes = document.querySelectorAll(`input[data-category="${slug}"]`);
+    const allChecked = Array.from(checkboxes).every(cb => cb.checked);
+    checkboxes.forEach(cb => cb.checked = !allChecked);
+    updateInstrumentSelection();
+}
+
+function filterInstruments() {
+    const query = document.getElementById('instrument-search').value.toLowerCase().trim();
+    document.querySelectorAll('.instrument-item').forEach(el => {
+        const symbol = el.getAttribute('data-symbol') || '';
+        el.style.display = (!query || symbol.includes(query)) ? '' : 'none';
+    });
+}
+
+function deselectAll() {
+    document.querySelectorAll('input[name="instruments"]').forEach(cb => cb.checked = false);
+    updateInstrumentSelection();
 }
 
 // Step Navigation
@@ -377,6 +494,13 @@ function updateInstrumentSelection() {
     const nextBtn = document.getElementById('next1');
     nextBtn.disabled = selectedInstruments.length === 0;
     nextBtn.classList.toggle('opacity-50', selectedInstruments.length === 0);
+
+    const countEl = document.getElementById('selection-count');
+    if (countEl) {
+        countEl.textContent = selectedInstruments.length > 0
+            ? `${selectedInstruments.length} selected`
+            : '';
+    }
 }
 
 // Load Expiries
@@ -406,7 +530,9 @@ function displayExpiries(expiries) {
         const instrumentDiv = document.createElement('div');
         instrumentDiv.className = 'border border-gray-200 rounded-lg p-4';
 
-        const instrumentName = instrument.split('|')[1] || instrument;
+        // Look up display name from loaded instruments, fallback to key suffix
+        const matched = allWizardInstruments.find(i => i.instrument_key === instrument);
+        const instrumentName = matched ? matched.symbol : (instrument.split('|')[1] || instrument);
 
         instrumentDiv.innerHTML = `
             <div class="flex items-center justify-between mb-4">
@@ -461,7 +587,10 @@ function showSummary() {
     selectedContractType = document.querySelector('input[name="contract_type"]:checked').value;
 
     let summary = `
-        <p><strong>Instruments:</strong> ${selectedInstruments.map(i => i.split('|')[1] || i).join(', ')}</p>
+        <p><strong>Instruments:</strong> ${selectedInstruments.map(i => {
+            const m = allWizardInstruments.find(inst => inst.instrument_key === i);
+            return m ? m.symbol : (i.split('|')[1] || i);
+        }).join(', ')}</p>
         <p><strong>Contract Type:</strong> ${selectedContractType}</p>
         <p><strong>Expiries:</strong> ${Object.values(selectedExpiries).flat().length} selected</p>
     `;
@@ -539,7 +668,20 @@ function showInlineProgress() {
 }
 
 function startProgressTracking() {
-    progressInterval = setInterval(updateProgress, 1000);
+    // SSE-driven: when we get a task event for our taskId, trigger a fetch
+    if (window._sseSource) {
+        function onSSE(e) {
+            try {
+                var d = JSON.parse(e.data);
+                if (d.task_id === taskId) updateProgress();
+            } catch(err) {}
+        }
+        window._sseSource.addEventListener('task:update', onSSE);
+        window._sseSource.addEventListener('task:completed', onSSE);
+        window._sseSource.addEventListener('task:failed', onSSE);
+    }
+    // Always keep a polling fallback (slower interval when SSE is active)
+    progressInterval = setInterval(updateProgress, window._sseSource ? 5000 : 1000);
 }
 
 async function updateProgress() {
@@ -570,9 +712,15 @@ async function updateProgress() {
             document.getElementById('stat-candles').textContent = task.stats.candles || 0;
             document.getElementById('stat-errors').textContent = task.stats.errors || 0;
 
-            // Update current action
+            // Update current action (replace instrument keys with display names)
             if (task.current_action) {
-                document.getElementById('current-action').textContent = task.current_action;
+                let actionText = task.current_action;
+                allWizardInstruments.forEach(inst => {
+                    if (actionText.includes(inst.instrument_key)) {
+                        actionText = actionText.replace(inst.instrument_key, inst.symbol);
+                    }
+                });
+                document.getElementById('current-action').textContent = actionText;
             }
 
             // Render per-instrument progress
@@ -581,7 +729,8 @@ async function updateProgress() {
                 section.classList.remove('hidden');
                 const container = document.getElementById('instrument-progress-bars');
                 container.innerHTML = Object.entries(task.instrument_progress).map(([name, ip]) => {
-                    const label = name.split('|')[1] || name;
+                    const mi = allWizardInstruments.find(inst => inst.instrument_key === name);
+                    const label = mi ? mi.symbol : (name.split('|')[1] || name);
                     const statusColor = ip.status === 'completed' ? 'green' :
                                         ip.status === 'failed' ? 'red' :
                                         ip.status === 'running' ? 'blue' : 'gray';
@@ -652,7 +801,7 @@ function startNewCollection() {
 }
 
 function goToStatus() {
-    window.location.href = '{{ url_for("status_page") }}';
+    window.location.href = '{{ url_for("status.status_page") }}';
 }
 
 // Utility Functions

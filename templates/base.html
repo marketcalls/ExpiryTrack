@@ -3,11 +3,16 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="csrf-token" content="{{ csrf_token() }}">
     <title>{% block title %}ExpiryTrack{% endblock %}</title>
 
     <!-- TailwindCSS & DaisyUI -->
     <link href="https://cdn.jsdelivr.net/npm/daisyui@4.4.24/dist/full.min.css" rel="stylesheet" type="text/css" />
     <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- htmx for progressive enhancement -->
+    <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+    <script src="https://unpkg.com/htmx-ext-sse@2.2.2/sse.js"></script>
 
     <!-- Apply theme before paint to prevent FOUC -->
     <script>
@@ -223,38 +228,48 @@
     <nav class="navbar-supabase sticky top-0 z-50">
         <div class="container mx-auto px-4">
             <div class="flex items-center justify-between h-16">
+                <!-- Logo -->
                 <div class="flex items-center">
                     <a href="{{ url_for('index') }}" class="text-2xl font-bold supabase-text-gradient">
                         ExpiryTrack
                     </a>
                 </div>
-                <div class="flex items-center space-x-2">
-                    <a href="{{ url_for('index') }}" class="nav-link">
-                        Home
-                    </a>
-                    <a href="{{ url_for('collect_page') }}" class="nav-link">
-                        Collect Data
-                    </a>
-                    <a href="{{ url_for('export_wizard') }}" class="nav-link">
-                        Export Data
-                    </a>
-                    <a href="{{ url_for('settings') }}" class="nav-link">
-                        Settings
-                    </a>
-                    <a href="{{ url_for('help_page') }}" class="nav-link">
-                        Help
-                    </a>
-                    {% if is_authenticated %}
-                    <a href="{{ url_for('analytics_page') }}" class="nav-link">
-                        Analytics
-                    </a>
-                    <a href="{{ url_for('download_status_page') }}" class="nav-link">
-                        Download Status
-                    </a>
-                    <a href="{{ url_for('status_page') }}" class="nav-link">
-                        Status
-                    </a>
 
+                <!-- Desktop Nav -->
+                <div class="hidden md:flex items-center space-x-1">
+                    <!-- Primary Links -->
+                    <a href="{{ url_for('index') }}" class="nav-link">Home</a>
+                    {% if is_authenticated %}
+                    <a href="{{ url_for('instruments.instruments_page') }}" class="nav-link">Instruments</a>
+                    {% endif %}
+                    <a href="{{ url_for('collect.collect_page') }}" class="nav-link">Collect</a>
+                    <a href="{{ url_for('export.export_wizard') }}" class="nav-link">Export</a>
+
+                    {% if is_authenticated %}
+                    <!-- "More" Dropdown -->
+                    <div class="dropdown dropdown-end">
+                        <label tabindex="0" class="nav-link cursor-pointer flex items-center gap-1">
+                            More
+                            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+                        </label>
+                        <ul tabindex="0" class="dropdown-content z-[51] menu p-2 shadow-lg bg-base-100 border border-base-300 rounded-lg w-48 mt-2">
+                            <li><a href="{{ url_for('analytics.analytics_page') }}">Analytics</a></li>
+                            <li><a href="{{ url_for('status.download_status_page') }}">Download Status</a></li>
+                            <li><a href="{{ url_for('status.status_page') }}">Status</a></li>
+                            <li class="border-t border-base-200 mt-1 pt-1"></li>
+                            <li><a href="{{ url_for('auth.settings') }}">Settings</a></li>
+                            <li><a href="{{ url_for('help_page') }}">Help</a></li>
+                        </ul>
+                    </div>
+                    {% else %}
+                    <a href="{{ url_for('auth.settings') }}" class="nav-link">Settings</a>
+                    <a href="{{ url_for('help_page') }}" class="nav-link">Help</a>
+                    {% endif %}
+                </div>
+
+                <!-- Right Side: Badges + Actions -->
+                <div class="flex items-center space-x-1">
+                    {% if is_authenticated %}
                     <!-- Token Expiry Badge (#7) -->
                     <span id="token-badge" class="badge badge-sm badge-success cursor-pointer hidden" title="Token status">Token: --</span>
 
@@ -274,13 +289,16 @@
                                     <span id="collection-badge-candles">0 candles</span>
                                     <span id="collection-badge-action" class="truncate ml-2 text-right">Idle</span>
                                 </div>
-                                <a href="{{ url_for('status_page') }}" class="btn btn-xs btn-outline btn-success mt-2">View Status</a>
+                                <a href="{{ url_for('status.status_page') }}" class="btn btn-xs btn-outline btn-success mt-2">View Status</a>
                             </div>
                         </div>
                     </div>
 
-                    <a href="{{ url_for('logout') }}" class="nav-link text-red-600 hover:bg-red-50 hover:text-red-700 font-medium">
-                        Logout
+                    <!-- Logout Icon -->
+                    <a href="{{ url_for('auth.logout') }}" class="btn btn-ghost btn-sm btn-circle text-red-500 hover:bg-red-50" title="Logout">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/>
+                        </svg>
                     </a>
                     {% endif %}
 
@@ -293,6 +311,36 @@
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"/>
                         </svg>
                     </button>
+
+                    <!-- Mobile Hamburger -->
+                    <div class="dropdown dropdown-end md:hidden">
+                        <label tabindex="0" class="btn btn-ghost btn-sm btn-circle">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/>
+                            </svg>
+                        </label>
+                        <ul tabindex="0" class="dropdown-content z-[51] menu p-2 shadow-lg bg-base-100 border border-base-300 rounded-lg w-52 mt-2">
+                            <li><a href="{{ url_for('index') }}">Home</a></li>
+                            {% if is_authenticated %}
+                            <li><a href="{{ url_for('instruments.instruments_page') }}">Instruments</a></li>
+                            {% endif %}
+                            <li><a href="{{ url_for('collect.collect_page') }}">Collect Data</a></li>
+                            <li><a href="{{ url_for('export.export_wizard') }}">Export Data</a></li>
+                            {% if is_authenticated %}
+                            <li class="border-t border-base-200 mt-1 pt-1"></li>
+                            <li><a href="{{ url_for('analytics.analytics_page') }}">Analytics</a></li>
+                            <li><a href="{{ url_for('status.download_status_page') }}">Download Status</a></li>
+                            <li><a href="{{ url_for('status.status_page') }}">Status</a></li>
+                            {% endif %}
+                            <li class="border-t border-base-200 mt-1 pt-1"></li>
+                            <li><a href="{{ url_for('auth.settings') }}">Settings</a></li>
+                            <li><a href="{{ url_for('help_page') }}">Help</a></li>
+                            {% if is_authenticated %}
+                            <li class="border-t border-base-200 mt-1 pt-1"></li>
+                            <li><a href="{{ url_for('auth.logout') }}" class="text-red-500">Logout</a></li>
+                            {% endif %}
+                        </ul>
+                    </div>
                 </div>
             </div>
         </div>
@@ -427,83 +475,146 @@
         div.textContent = text;
         return div.innerHTML;
     }
+
+    // Global fetch wrapper — auto-includes CSRF token on mutating requests
+    (function() {
+        var _origFetch = window.fetch;
+        window.fetch = function(url, options) {
+            options = options || {};
+            var method = (options.method || 'GET').toUpperCase();
+            if (['POST', 'PUT', 'PATCH', 'DELETE'].indexOf(method) !== -1) {
+                var meta = document.querySelector('meta[name="csrf-token"]');
+                if (meta) {
+                    options.headers = options.headers || {};
+                    // Support both plain objects and Headers instances
+                    if (options.headers instanceof Headers) {
+                        if (!options.headers.has('X-CSRFToken')) {
+                            options.headers.set('X-CSRFToken', meta.getAttribute('content'));
+                        }
+                    } else {
+                        if (!options.headers['X-CSRFToken']) {
+                            options.headers['X-CSRFToken'] = meta.getAttribute('content');
+                        }
+                    }
+                }
+            }
+            return _origFetch.call(this, url, options);
+        };
+    })();
     </script>
 
-    <!-- Token Expiry Polling (#7) -->
+    <!-- SSE Real-Time Updates -->
     {% if is_authenticated %}
     <script>
     (function() {
         var tokenWarned = {};
-        function checkTokenStatus() {
+        var evtSource = null;
+        var reconnectDelay = 1000;
+
+        function updateTokenBadge(data) {
+            var badge = document.getElementById('token-badge');
+            if (!badge) return;
+            if (!data.valid) {
+                badge.textContent = 'Token: Expired';
+                badge.className = 'badge badge-sm badge-error cursor-pointer';
+                badge.classList.remove('hidden');
+                return;
+            }
+            badge.classList.remove('hidden');
+            var secs = data.remaining_seconds || 0;
+            var hrs = Math.floor(secs / 3600);
+            var mins = Math.floor((secs % 3600) / 60);
+            badge.textContent = 'Token: ' + hrs + 'h ' + mins + 'm';
+            if (secs > 7200) {
+                badge.className = 'badge badge-sm badge-success cursor-pointer';
+            } else if (secs > 3600) {
+                badge.className = 'badge badge-sm badge-warning cursor-pointer';
+            } else {
+                badge.className = 'badge badge-sm badge-error cursor-pointer';
+            }
+            [1800, 900, 300].forEach(function(threshold) {
+                if (secs <= threshold && secs > threshold - 65 && !tokenWarned[threshold]) {
+                    tokenWarned[threshold] = true;
+                    var label = threshold >= 60 ? Math.floor(threshold/60) + ' minutes' : threshold + ' seconds';
+                    showToast('Token expires in ' + label + '. Re-authenticate soon.', 'warning', 8000);
+                }
+            });
+        }
+
+        function updateCollectionBadge(data) {
+            var wrapper = document.getElementById('collection-status');
+            if (!wrapper) return;
+            var status = data.status || '';
+            if (status === 'completed' || status === 'failed') {
+                wrapper.classList.add('hidden');
+                return;
+            }
+            if (data.task_type !== 'collection') return;
+            wrapper.classList.remove('hidden');
+            document.getElementById('collection-badge-text').textContent = (data.progress || 0) + '%';
+            document.getElementById('collection-badge-bar').style.width = (data.progress || 0) + '%';
+            var candles = (data.stats && data.stats.candles) || 0;
+            document.getElementById('collection-badge-candles').textContent = candles.toLocaleString() + ' candles';
+            document.getElementById('collection-badge-action').textContent = data.current_action || 'Processing...';
+        }
+
+        function connectSSE() {
+            if (evtSource) evtSource.close();
+            evtSource = new EventSource('/api/events');
+
+            evtSource.addEventListener('auth:token_updated', function(e) {
+                try { updateTokenBadge(JSON.parse(e.data)); } catch(err) {}
+            });
+
+            evtSource.addEventListener('task:update', function(e) {
+                try { updateCollectionBadge(JSON.parse(e.data)); } catch(err) {}
+            });
+            evtSource.addEventListener('task:created', function(e) {
+                try { updateCollectionBadge(JSON.parse(e.data)); } catch(err) {}
+            });
+            evtSource.addEventListener('task:completed', function(e) {
+                try { updateCollectionBadge(JSON.parse(e.data)); } catch(err) {}
+            });
+            evtSource.addEventListener('task:failed', function(e) {
+                try { updateCollectionBadge(JSON.parse(e.data)); } catch(err) {}
+            });
+
+            evtSource.onopen = function() { reconnectDelay = 1000; };
+            evtSource.onerror = function() {
+                evtSource.close();
+                setTimeout(connectSSE, reconnectDelay);
+                reconnectDelay = Math.min(reconnectDelay * 2, 30000);
+            };
+
+            // Expose globally so page-specific scripts can add listeners
+            window._sseSource = evtSource;
+        }
+
+        connectSSE();
+
+        // Initial fetch for token status (SSE only pushes on change)
+        fetch('/api/auth/token-status')
+            .then(function(r) { return r.json(); })
+            .then(updateTokenBadge)
+            .catch(function() {});
+        // Refresh token display every 60s as a fallback
+        setInterval(function() {
             fetch('/api/auth/token-status')
                 .then(function(r) { return r.json(); })
-                .then(function(data) {
-                    var badge = document.getElementById('token-badge');
-                    if (!badge) return;
-                    if (!data.valid) {
-                        badge.textContent = 'Token: Expired';
-                        badge.className = 'badge badge-sm badge-error cursor-pointer';
-                        badge.classList.remove('hidden');
-                        return;
-                    }
-                    badge.classList.remove('hidden');
-                    var secs = data.remaining_seconds || 0;
-                    var hrs = Math.floor(secs / 3600);
-                    var mins = Math.floor((secs % 3600) / 60);
-                    badge.textContent = 'Token: ' + hrs + 'h ' + mins + 'm';
-                    if (secs > 7200) {
-                        badge.className = 'badge badge-sm badge-success cursor-pointer';
-                    } else if (secs > 3600) {
-                        badge.className = 'badge badge-sm badge-warning cursor-pointer';
-                    } else {
-                        badge.className = 'badge badge-sm badge-error cursor-pointer';
-                    }
-                    // Toast warnings at thresholds
-                    [1800, 900, 300].forEach(function(threshold) {
-                        if (secs <= threshold && secs > threshold - 65 && !tokenWarned[threshold]) {
-                            tokenWarned[threshold] = true;
-                            var label = threshold >= 60 ? Math.floor(threshold/60) + ' minutes' : threshold + ' seconds';
-                            showToast('Token expires in ' + label + '. Re-authenticate soon.', 'warning', 8000);
-                        }
-                    });
-                })
+                .then(updateTokenBadge)
                 .catch(function() {});
-        }
-        checkTokenStatus();
-        setInterval(checkTokenStatus, 60000);
-    })();
-    </script>
-
-    <!-- Collection Progress Polling (#8) -->
-    <script>
-    (function() {
-        function checkCollectionStatus() {
-            fetch('/api/collect/tasks')
-                .then(function(r) { return r.json(); })
-                .then(function(data) {
-                    var wrapper = document.getElementById('collection-status');
-                    if (!wrapper) return;
-                    var tasks = (data.tasks || []).filter(function(t) {
-                        return t.status === 'running' || t.status === 'pending';
-                    });
-                    if (tasks.length === 0) {
-                        wrapper.classList.add('hidden');
-                        return;
-                    }
-                    wrapper.classList.remove('hidden');
-                    var task = tasks[0];
-                    document.getElementById('collection-badge-text').textContent = (task.progress || 0) + '%';
-                    document.getElementById('collection-badge-bar').style.width = (task.progress || 0) + '%';
-                    document.getElementById('collection-badge-candles').textContent = ((task.stats && task.stats.candles) || 0).toLocaleString() + ' candles';
-                    document.getElementById('collection-badge-action').textContent = task.current_action || 'Processing...';
-                })
-                .catch(function() {});
-        }
-        checkCollectionStatus();
-        setInterval(checkCollectionStatus, 5000);
+        }, 60000);
     })();
     </script>
     {% endif %}
+
+    <!-- htmx CSRF token configuration -->
+    <script>
+    document.body.addEventListener('htmx:configRequest', function(evt) {
+        var token = document.querySelector('meta[name="csrf-token"]');
+        if (token) evt.detail.headers['X-CSRFToken'] = token.getAttribute('content');
+    });
+    </script>
 
     {% block scripts %}{% endblock %}
 </body>

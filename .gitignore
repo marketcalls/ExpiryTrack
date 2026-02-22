@@ -227,7 +227,7 @@ exports/*.parquet
 .ipynb_checkpoints/
 *.ipynb
 scratch/
-test_*.py
+/test_*.py
 debug_*.py
 
 # Documentation build

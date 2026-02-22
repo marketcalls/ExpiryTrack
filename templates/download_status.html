@@ -243,7 +243,8 @@ function esc(s) {
     return d.innerHTML;
 }
 function escAttr(s) {
-    return s.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+    if (!s) return '';
+    return String(s).replace(/&/g,'&amp;').replace(/'/g,'&#39;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
 // ── View Missing Contracts ──

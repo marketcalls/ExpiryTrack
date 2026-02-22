@@ -1,23 +1,26 @@
 """
 Encryption utilities for secure credential storage
 """
+
+import base64
+import getpass
+import logging
 import os
 import platform
-import getpass
-import base64
-import logging
-from cryptography.fernet import Fernet
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from pathlib import Path
 
+from cryptography.fernet import Fernet, InvalidToken
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+
 logger = logging.getLogger(__name__)
+
 
 class CredentialEncryption:
     """Handle encryption/decryption of sensitive credentials"""
 
     def __init__(self):
-        self.key_file = Path.home() / '.expirytrack' / '.key'
+        self.key_file = Path.home() / ".expirytrack" / ".key"
         self.key = self._get_or_create_key()
         self.cipher = Fernet(self.key)
 
@@ -28,7 +31,7 @@ class CredentialEncryption:
 
         if self.key_file.exists():
             # Load existing key
-            with open(self.key_file, 'rb') as f:
+            with open(self.key_file, "rb") as f:
                 return f.read()
         else:
             # Generate new key using machine-specific salt
@@ -45,27 +48,28 @@ class CredentialEncryption:
             key = base64.urlsafe_b64encode(kdf.derive(password))
 
             # Save key
-            with open(self.key_file, 'wb') as f:
+            with open(self.key_file, "wb") as f:
                 f.write(key)
 
             # Set file permissions (Windows compatible)
             try:
                 import stat
+
                 os.chmod(self.key_file, stat.S_IRUSR | stat.S_IWUSR)
-            except Exception:
-                pass  # Windows may not support chmod
+            except OSError:
+                logger.debug("Could not set key file permissions (expected on Windows)")
 
             return key
 
     def _get_machine_salt(self) -> bytes:
         """Generate machine-specific salt"""
-        hostname = platform.node() or 'unknown'
+        hostname = platform.node() or "unknown"
         try:
             username = getpass.getuser()
-        except Exception:
-            username = 'user'
+        except (OSError, KeyError):
+            username = "user"
         machine_id = f"{hostname}_{username}"
-        return machine_id.encode()[:16].ljust(16, b'0')  # Ensure 16 bytes
+        return machine_id.encode()[:16].ljust(16, b"0")  # Ensure 16 bytes
 
     def encrypt(self, plaintext: str) -> str:
         """Encrypt plaintext string (Fernet output is already base64-safe)"""
@@ -80,15 +84,16 @@ class CredentialEncryption:
         # Try new format first (direct Fernet token)
         try:
             return self.cipher.decrypt(ciphertext.encode()).decode()
-        except Exception:
-            pass
+        except (ValueError, InvalidToken):
+            logger.debug("Direct Fernet decrypt failed, trying legacy format")
         # Fall back to legacy double-base64 format
         try:
             encrypted_bytes = base64.urlsafe_b64decode(ciphertext.encode())
             return self.cipher.decrypt(encrypted_bytes).decode()
-        except Exception as e:
+        except (ValueError, InvalidToken) as e:
             logger.warning(f"Decryption failed: {e}")
             return ""
+
 
 # Singleton instance
 encryption = CredentialEncryption()

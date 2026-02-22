@@ -68,7 +68,7 @@
         <div class="card-minimal p-6">
             <div class="flex items-center justify-between mb-4">
                 <h3 class="text-lg font-semibold">Data Coverage by Expiry</h3>
-                <a href="{{ url_for('download_status_page') }}" class="text-sm text-green-600 hover:text-green-700 font-medium">View Details &rarr;</a>
+                <a href="{{ url_for('status.download_status_page') }}" class="text-sm text-green-600 hover:text-green-700 font-medium">View Details &rarr;</a>
             </div>
             <canvas id="chart-coverage" height="200"></canvas>
         </div>
@@ -134,7 +134,7 @@ async function loadSummary() {
         document.getElementById('s-candles').textContent = fmt(d.total_candles);
         document.getElementById('s-with-data').textContent = fmt(d.contracts_with_data);
         document.getElementById('s-days').textContent = fmt(d.trading_days);
-        document.getElementById('s-coverage').textContent = d.coverage_pct + '%';
+        document.getElementById('s-coverage').textContent = (d.coverage_pct ?? 0) + '%';
     } catch (e) { console.error('Summary error:', e); }
 }
 

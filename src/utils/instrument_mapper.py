@@ -3,6 +3,7 @@ Dynamic instrument name mapping — reads from database (#9)
 
 Falls back to hardcoded defaults when DB is not available.
 """
+
 import logging
 
 logger = logging.getLogger(__name__)
@@ -27,11 +28,12 @@ def _load_from_db():
     global _cached_mapping, _cached_reverse
     try:
         from ..database.manager import DatabaseManager
+
         db = DatabaseManager()
         instruments = db.get_active_instruments()
         if instruments:
-            _cached_mapping = {inst['symbol']: inst['instrument_key'] for inst in instruments}
-            _cached_reverse = {inst['instrument_key']: inst['symbol'] for inst in instruments}
+            _cached_mapping = {inst["symbol"]: inst["instrument_key"] for inst in instruments}
+            _cached_reverse = {inst["instrument_key"]: inst["symbol"] for inst in instruments}
             return
     except Exception as e:
         logger.debug(f"Could not load instruments from DB, using fallback: {e}")
@@ -54,6 +56,7 @@ def refresh_cache():
 
 
 # Public API — same interface as before
+
 
 def get_instrument_key(display_name: str) -> str:
     """Get the Upstox instrument key from user-friendly display name."""
@@ -82,6 +85,7 @@ def get_all_instrument_keys() -> list:
 # Keep INSTRUMENT_MAPPING as a lazy property for backward compatibility
 class _MappingProxy(dict):
     """Dict-like proxy that lazy-loads from DB."""
+
     def __init__(self):
         super().__init__()
         self._loaded = False
