@@ -24,6 +24,10 @@ MIGRATIONS = [
     "m007_analytics_indexes",
     "m008_analytics_summary",
     "m009_drop_historical_fk",
+    "m010_quality_reports",
+    "m011_export_history",
+    "m012_notifications",
+    "m013_backtesting",
 ]
 
 

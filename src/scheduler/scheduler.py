@@ -113,6 +113,26 @@ class SchedulerManager:
                 replace_existing=True,
             )
 
+        # Weekly quality check — Saturday at 11:00
+        if not self.scheduler.get_job("weekly_quality_check"):
+            self.scheduler.add_job(
+                self._run_quality_check,
+                CronTrigger(hour=11, minute=0, day_of_week="sat"),
+                id="weekly_quality_check",
+                name="Weekly data quality check",
+                replace_existing=True,
+            )
+
+        # Daily export file cleanup — runs at 02:00
+        if not self.scheduler.get_job("export_cleanup"):
+            self.scheduler.add_job(
+                self._run_export_cleanup,
+                CronTrigger(hour=2, minute=0),
+                id="export_cleanup",
+                name="Daily export file cleanup (7-day retention)",
+                replace_existing=True,
+            )
+
         # Database checkpoint — every 6 hours
         if not self.scheduler.get_job("db_checkpoint"):
             self.scheduler.add_job(
@@ -230,6 +250,62 @@ class SchedulerManager:
             refresh_daily_summary(db)
         except Exception as e:
             logger.error(f"Analytics refresh failed: {e}")
+            raise
+
+    def _run_quality_check(self):
+        """Run weekly data quality check and save report."""
+        logger.info("Scheduler: running weekly quality check")
+        try:
+            from ..database.manager import DatabaseManager
+            from ..quality.checker import DataQualityChecker
+
+            db = DatabaseManager()
+            checker = DataQualityChecker(db)
+            report = checker.run_all_checks()
+            checker.save_report(report)
+            logger.info(
+                f"Weekly quality check complete: {report.checks_run} checks, "
+                f"{report.error_count} errors, {report.warning_count} warnings"
+            )
+        except Exception as e:
+            logger.error(f"Quality check failed: {e}")
+            raise
+
+    def _run_export_cleanup(self):
+        """Delete export files older than 7 days and update history records."""
+        logger.info("Scheduler: running export file cleanup")
+        try:
+            import os
+
+            from ..database.manager import DatabaseManager
+
+            db = DatabaseManager()
+            expired = db.exports_repo.get_expired_exports(days=7)
+
+            deleted_count = 0
+            for record in expired:
+                file_path = record.get("file_path", "")
+                # Delete the file from disk if it exists
+                if file_path and os.path.exists(file_path):
+                    try:
+                        os.remove(file_path)
+                        deleted_count += 1
+                    except OSError as e:
+                        logger.warning(f"Failed to delete export file {file_path}: {e}")
+
+                # Remove the history record
+                db.exports_repo.delete_export(record["id"])
+
+            if deleted_count or expired:
+                logger.info(
+                    f"Export cleanup: deleted {deleted_count} file(s), "
+                    f"removed {len(expired)} history record(s)"
+                )
+            else:
+                logger.info("Export cleanup: no expired exports found")
+
+        except Exception as e:
+            logger.error(f"Export cleanup failed: {e}")
             raise
 
     def _run_checkpoint(self):

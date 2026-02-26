@@ -1,0 +1,420 @@
+{% extends "base.html" %}
+
+{% block title %}Import Data - ExpiryTrack{% endblock %}
+
+{% block breadcrumbs %}
+<li><a href="{{ url_for('admin.data_management_page') }}" class="text-gray-500 hover:text-green-600">Data Management</a></li>
+<li class="text-gray-700 font-medium">Import</li>
+{% endblock %}
+
+{% block content %}
+<div class="max-w-5xl mx-auto">
+    <div class="flex items-center justify-between mb-8">
+        <h1 class="text-3xl font-bold supabase-text-gradient">Import External Data</h1>
+    </div>
+
+    <!-- Step 1: File Upload -->
+    <div id="step-upload" class="card-minimal p-6 mb-6">
+        <h3 class="text-lg font-semibold mb-2">Step 1: Upload File</h3>
+        <p class="text-sm text-gray-500 mb-4">
+            Upload a CSV or Parquet file containing OHLCV data. Maximum file size: 100 MB.
+        </p>
+        <form id="upload-form" enctype="multipart/form-data">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+            <div class="flex flex-wrap items-end gap-4">
+                <div class="flex-1 min-w-[200px]">
+                    <label class="text-sm text-gray-500 font-medium block mb-1">Data File</label>
+                    <input type="file" id="file-input" name="file"
+                           accept=".csv,.parquet"
+                           class="file-input file-input-bordered file-input-sm w-full max-w-md" />
+                </div>
+                <button type="submit" class="btn-supabase text-sm" id="btn-preview">
+                    Upload & Preview
+                </button>
+            </div>
+            <div id="upload-error" class="mt-3 text-sm text-red-600 hidden"></div>
+        </form>
+    </div>
+
+    <!-- Step 2: Preview & Column Mapping (hidden until file uploaded) -->
+    <div id="step-mapping" class="card-minimal p-6 mb-6 hidden">
+        <h3 class="text-lg font-semibold mb-2">Step 2: Preview & Map Columns</h3>
+        <p class="text-sm text-gray-500 mb-2">
+            Showing first 10 rows. Map each detected column to the ExpiryTrack schema.
+        </p>
+
+        <!-- File info -->
+        <div class="flex gap-4 mb-4 text-sm">
+            <span class="badge badge-outline badge-sm" id="info-rows">0 rows</span>
+            <span class="badge badge-outline badge-sm" id="info-cols">0 columns</span>
+        </div>
+
+        <!-- Preview table -->
+        <div class="overflow-x-auto mb-6 max-h-64 overflow-y-auto border border-gray-200 rounded-lg">
+            <table class="table table-xs table-zebra w-full" id="preview-table">
+                <thead id="preview-thead" class="sticky top-0 bg-base-200"></thead>
+                <tbody id="preview-tbody"></tbody>
+            </table>
+        </div>
+
+        <!-- Column Mapping UI -->
+        <h4 class="font-semibold mb-3 text-sm">Column Mapping</h4>
+        <div id="mapping-container" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 mb-6"></div>
+
+        <!-- Mapping validation -->
+        <div id="mapping-status" class="mb-4 text-sm"></div>
+
+        <!-- Instrument Key -->
+        <div class="mb-6">
+            <label class="text-sm text-gray-500 font-medium block mb-1">Instrument Key (expired_instrument_key)</label>
+            <p class="text-xs text-gray-400 mb-2">
+                The key that identifies which instrument this data belongs to (e.g. "NSE_FO|Nifty 50|CE|22000|2026-02-27").
+            </p>
+            <input type="text" id="instrument-key" placeholder="Enter instrument key..."
+                   class="input input-bordered input-sm w-full max-w-lg" />
+        </div>
+
+        <!-- Import button -->
+        <div class="flex items-center gap-4">
+            <button onclick="executeImport()" class="btn-supabase text-sm" id="btn-import" disabled>
+                Import Data
+            </button>
+            <button onclick="resetForm()" class="btn btn-sm btn-outline">
+                Start Over
+            </button>
+        </div>
+    </div>
+
+    <!-- Step 3: Import Result (hidden until import done) -->
+    <div id="step-result" class="card-minimal p-6 mb-6 hidden">
+        <h3 class="text-lg font-semibold mb-4">Import Result</h3>
+        <div id="result-content" class="space-y-2"></div>
+        <div class="mt-4">
+            <button onclick="resetForm()" class="btn-supabase text-sm">Import Another File</button>
+        </div>
+    </div>
+
+    <!-- Loading overlay -->
+    <div id="loading-overlay" class="fixed inset-0 bg-black bg-opacity-30 z-50 hidden flex items-center justify-center">
+        <div class="card-minimal p-8 flex flex-col items-center gap-4">
+            <span class="loading loading-spinner loading-lg text-success"></span>
+            <span id="loading-text" class="text-sm text-gray-600">Processing...</span>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// State
+let uploadedFileToken = null;
+let detectedColumns = [];
+let suggestedMapping = {};
+
+const TARGET_COLUMNS = [
+    {value: '', label: '-- Skip --'},
+    {value: 'timestamp', label: 'timestamp', required: true},
+    {value: 'open', label: 'open', required: true},
+    {value: 'high', label: 'high', required: true},
+    {value: 'low', label: 'low', required: true},
+    {value: 'close', label: 'close', required: true},
+    {value: 'volume', label: 'volume', required: true},
+    {value: 'oi', label: 'oi (open interest)', required: false},
+];
+
+const REQUIRED_TARGETS = new Set(['timestamp', 'open', 'high', 'low', 'close', 'volume']);
+
+// ── Upload & Preview ──
+document.getElementById('upload-form').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    const fileInput = document.getElementById('file-input');
+    const errorDiv = document.getElementById('upload-error');
+    errorDiv.classList.add('hidden');
+
+    if (!fileInput.files.length) {
+        errorDiv.textContent = 'Please select a file.';
+        errorDiv.classList.remove('hidden');
+        return;
+    }
+
+    const file = fileInput.files[0];
+    const ext = file.name.split('.').pop().toLowerCase();
+    if (!['csv', 'parquet'].includes(ext)) {
+        errorDiv.textContent = 'Unsupported file type. Please upload a .csv or .parquet file.';
+        errorDiv.classList.remove('hidden');
+        return;
+    }
+
+    if (file.size > 100 * 1024 * 1024) {
+        errorDiv.textContent = 'File is too large. Maximum size is 100 MB.';
+        errorDiv.classList.remove('hidden');
+        return;
+    }
+
+    showLoading('Uploading and analyzing file...');
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+        const res = await fetch('/api/admin/import/preview', {
+            method: 'POST',
+            body: formData
+        });
+        const data = await res.json();
+        hideLoading();
+
+        if (!res.ok) {
+            errorDiv.textContent = data.error || 'Failed to process file.';
+            errorDiv.classList.remove('hidden');
+            return;
+        }
+
+        uploadedFileToken = data.file_token;
+        detectedColumns = data.columns;
+        suggestedMapping = data.suggested_mapping || {};
+
+        renderPreview(data);
+        renderMapping(data.columns, data.suggested_mapping);
+
+        document.getElementById('step-mapping').classList.remove('hidden');
+        document.getElementById('step-mapping').scrollIntoView({behavior: 'smooth'});
+    } catch (err) {
+        hideLoading();
+        errorDiv.textContent = 'Error: ' + err.message;
+        errorDiv.classList.remove('hidden');
+    }
+});
+
+// ── Render preview table ──
+function renderPreview(data) {
+    document.getElementById('info-rows').textContent = data.total_rows.toLocaleString() + ' rows';
+    document.getElementById('info-cols').textContent = data.columns.length + ' columns';
+
+    const thead = document.getElementById('preview-thead');
+    const tbody = document.getElementById('preview-tbody');
+
+    // Header
+    let headerHtml = '<tr>';
+    data.columns.forEach(function(col) {
+        headerHtml += '<th class="text-xs">' + escapeHtml(col) + '</th>';
+    });
+    headerHtml += '</tr>';
+    thead.innerHTML = headerHtml;
+
+    // Rows
+    let bodyHtml = '';
+    data.rows.forEach(function(row) {
+        bodyHtml += '<tr>';
+        data.columns.forEach(function(col) {
+            const val = row[col] != null ? row[col] : '';
+            bodyHtml += '<td class="text-xs max-w-[200px] truncate">' + escapeHtml(String(val)) + '</td>';
+        });
+        bodyHtml += '</tr>';
+    });
+    tbody.innerHTML = bodyHtml;
+}
+
+// ── Render column mapping dropdowns ──
+function renderMapping(columns, suggested) {
+    const container = document.getElementById('mapping-container');
+    container.innerHTML = '';
+
+    columns.forEach(function(col) {
+        const div = document.createElement('div');
+        div.className = 'flex flex-col gap-1';
+
+        const label = document.createElement('label');
+        label.className = 'text-xs font-medium text-gray-600 truncate';
+        label.title = col;
+        label.textContent = col;
+
+        const select = document.createElement('select');
+        select.className = 'select select-bordered select-xs w-full mapping-select';
+        select.dataset.sourceColumn = col;
+        select.addEventListener('change', validateMapping);
+
+        TARGET_COLUMNS.forEach(function(tc) {
+            const opt = document.createElement('option');
+            opt.value = tc.value;
+            opt.textContent = tc.label + (tc.required ? ' *' : '');
+            if (suggested[col] === tc.value) {
+                opt.selected = true;
+            }
+            select.appendChild(opt);
+        });
+
+        div.appendChild(label);
+        div.appendChild(select);
+        container.appendChild(div);
+    });
+
+    validateMapping();
+}
+
+// ── Validate mapping — check all required columns are mapped ──
+function validateMapping() {
+    const selects = document.querySelectorAll('.mapping-select');
+    const mapped = new Set();
+    const duplicates = new Set();
+
+    selects.forEach(function(sel) {
+        const val = sel.value;
+        if (val) {
+            if (mapped.has(val)) {
+                duplicates.add(val);
+            }
+            mapped.add(val);
+        }
+    });
+
+    const missing = [];
+    REQUIRED_TARGETS.forEach(function(req) {
+        if (!mapped.has(req)) {
+            missing.push(req);
+        }
+    });
+
+    const statusDiv = document.getElementById('mapping-status');
+    const importBtn = document.getElementById('btn-import');
+    const instrumentKey = document.getElementById('instrument-key').value.trim();
+
+    if (duplicates.size > 0) {
+        statusDiv.innerHTML = '<span class="text-red-600">Duplicate mapping detected: ' +
+            Array.from(duplicates).join(', ') + '. Each target column can only be mapped once.</span>';
+        importBtn.disabled = true;
+    } else if (missing.length > 0) {
+        statusDiv.innerHTML = '<span class="text-amber-600">Missing required mappings: ' +
+            missing.join(', ') + '</span>';
+        importBtn.disabled = true;
+    } else {
+        statusDiv.innerHTML = '<span class="text-green-600">All required columns mapped.</span>';
+        importBtn.disabled = false;
+    }
+}
+
+// Re-validate when instrument key changes
+document.getElementById('instrument-key').addEventListener('input', validateMapping);
+
+// ── Build mapping from current UI state ──
+function getColumnMapping() {
+    const mapping = {};
+    document.querySelectorAll('.mapping-select').forEach(function(sel) {
+        if (sel.value) {
+            mapping[sel.dataset.sourceColumn] = sel.value;
+        }
+    });
+    return mapping;
+}
+
+// ── Execute import ──
+async function executeImport() {
+    const instrumentKey = document.getElementById('instrument-key').value.trim();
+    if (!instrumentKey) {
+        showToast('Please enter an instrument key', 'warning');
+        return;
+    }
+
+    const mapping = getColumnMapping();
+
+    // Confirm
+    const missing = [];
+    REQUIRED_TARGETS.forEach(function(req) {
+        if (!Object.values(mapping).includes(req)) {
+            missing.push(req);
+        }
+    });
+    if (missing.length > 0) {
+        showToast('Missing required column mappings: ' + missing.join(', '), 'error');
+        return;
+    }
+
+    if (!confirm('Import data into historical_data with instrument key "' + instrumentKey + '"?\n\nExisting data with the same key+timestamp will be replaced.')) {
+        return;
+    }
+
+    showLoading('Importing data...');
+
+    try {
+        const res = await fetch('/api/admin/import/execute', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                file_token: uploadedFileToken,
+                column_mapping: mapping,
+                instrument_key: instrumentKey
+            })
+        });
+        const data = await res.json();
+        hideLoading();
+
+        if (!res.ok) {
+            showToast('Import failed: ' + (data.error || 'Unknown error'), 'error');
+            return;
+        }
+
+        // Show result
+        document.getElementById('step-mapping').classList.add('hidden');
+        const resultDiv = document.getElementById('result-content');
+        resultDiv.innerHTML = `
+            <div class="flex items-center gap-2 text-green-600 font-semibold">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+                </svg>
+                Import Successful
+            </div>
+            <div class="grid grid-cols-2 md:grid-cols-3 gap-4 mt-4">
+                <div class="text-center">
+                    <div class="text-2xl font-bold text-gray-800">${(data.imported_rows || 0).toLocaleString()}</div>
+                    <div class="text-xs text-gray-500">Rows Processed</div>
+                </div>
+                <div class="text-center">
+                    <div class="text-2xl font-bold text-green-600">${((data.imported_rows || 0) - (data.duplicates_skipped || 0)).toLocaleString()}</div>
+                    <div class="text-xs text-gray-500">New Rows</div>
+                </div>
+                <div class="text-center">
+                    <div class="text-2xl font-bold text-amber-600">${(data.duplicates_skipped || 0).toLocaleString()}</div>
+                    <div class="text-xs text-gray-500">Duplicates Replaced</div>
+                </div>
+            </div>
+            <div class="mt-4 text-sm text-gray-500">
+                Instrument Key: <code class="bg-gray-100 px-2 py-0.5 rounded text-xs">${escapeHtml(data.instrument_key || instrumentKey)}</code>
+            </div>
+        `;
+        document.getElementById('step-result').classList.remove('hidden');
+        document.getElementById('step-result').scrollIntoView({behavior: 'smooth'});
+        showToast('Successfully imported ' + (data.imported_rows || 0).toLocaleString() + ' rows', 'success');
+    } catch (err) {
+        hideLoading();
+        showToast('Error: ' + err.message, 'error');
+    }
+}
+
+// ── Reset form ──
+function resetForm() {
+    uploadedFileToken = null;
+    detectedColumns = [];
+    suggestedMapping = {};
+    document.getElementById('file-input').value = '';
+    document.getElementById('instrument-key').value = '';
+    document.getElementById('step-mapping').classList.add('hidden');
+    document.getElementById('step-result').classList.add('hidden');
+    document.getElementById('upload-error').classList.add('hidden');
+    document.getElementById('preview-thead').innerHTML = '';
+    document.getElementById('preview-tbody').innerHTML = '';
+    document.getElementById('mapping-container').innerHTML = '';
+    document.getElementById('mapping-status').innerHTML = '';
+    window.scrollTo({top: 0, behavior: 'smooth'});
+}
+
+// ── Loading helpers ──
+function showLoading(text) {
+    document.getElementById('loading-text').textContent = text || 'Processing...';
+    document.getElementById('loading-overlay').classList.remove('hidden');
+}
+
+function hideLoading() {
+    document.getElementById('loading-overlay').classList.add('hidden');
+}
+</script>
+{% endblock %}

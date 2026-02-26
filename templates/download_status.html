@@ -2,6 +2,8 @@
 
 {% block title %}Download Status - ExpiryTrack{% endblock %}
 
+{% block breadcrumbs %}<li class="text-gray-700 font-medium">Download Status</li>{% endblock %}
+
 {% block content %}
 <div class="max-w-7xl mx-auto">
     <div class="flex items-center justify-between mb-8">
@@ -70,16 +72,35 @@
                         <th class="font-semibold text-right">Fetched</th>
                         <th class="font-semibold text-right">Missing</th>
                         <th class="font-semibold">Coverage</th>
+                        <th class="font-semibold text-center">Completeness</th>
                         <th class="font-semibold text-center">Status</th>
                         <th class="font-semibold text-center">Actions</th>
                     </tr>
                 </thead>
                 <tbody id="status-tbody">
                     <tr>
-                        <td colspan="8" class="text-center py-8 text-gray-400">Loading...</td>
+                        <td colspan="9" class="text-center py-8 text-gray-400">Loading...</td>
                     </tr>
                 </tbody>
             </table>
+        </div>
+        <!-- Pagination Controls -->
+        <div id="pagination-controls" class="flex items-center justify-between p-4 border-t hidden">
+            <div class="text-sm text-gray-500" id="pagination-info">-</div>
+            <div class="flex items-center gap-2">
+                <button onclick="goToPage(currentPage - 1)" id="btn-prev" class="btn btn-sm btn-ghost" disabled>Prev</button>
+                <span id="page-numbers" class="flex items-center gap-1"></span>
+                <button onclick="goToPage(currentPage + 1)" id="btn-next" class="btn btn-sm btn-ghost" disabled>Next</button>
+            </div>
+            <div class="flex items-center gap-2">
+                <label class="text-sm text-gray-500">Per page:</label>
+                <select id="per-page-select" onchange="changePerPage()" class="select select-bordered select-xs w-20">
+                    <option value="25">25</option>
+                    <option value="50" selected>50</option>
+                    <option value="100">100</option>
+                    <option value="0">All</option>
+                </select>
+            </div>
         </div>
     </div>
 </div>
@@ -105,6 +126,10 @@
 {% block scripts %}
 <script>
 let allData = [];
+let currentPage = 1;
+let totalPages = 1;
+let perPage = 50;
+let usePagination = true;
 
 function fmt(n) {
     if (n == null) return '-';
@@ -133,21 +158,84 @@ function populateInstrumentFilter(data) {
 }
 
 // ── Load data from API ──
-async function loadData() {
+async function loadData(page) {
+    if (page) currentPage = page;
     const instrument = document.getElementById('filter-instrument').value;
-    const url = instrument ? `/api/download-status?instrument=${encodeURIComponent(instrument)}` : '/api/download-status';
+    let url = '/api/download-status';
+    const params = new URLSearchParams();
+    if (instrument) params.set('instrument', instrument);
+    if (usePagination && perPage > 0) {
+        params.set('page', currentPage);
+        params.set('per_page', perPage);
+    }
+    if (params.toString()) url += '?' + params.toString();
 
     try {
         const res = await fetch(url);
         if (res.status === 401) { window.location.href = '/login'; return; }
-        allData = await res.json();
+        const result = await res.json();
+
+        if (result.items) {
+            // Paginated response
+            allData = result.items;
+            totalPages = result.total_pages;
+            currentPage = result.page;
+            updatePagination(result.total, result.page, result.total_pages);
+        } else {
+            // Flat list (no pagination)
+            allData = result;
+            totalPages = 1;
+            currentPage = 1;
+            document.getElementById('pagination-controls').classList.add('hidden');
+        }
         populateInstrumentFilter(allData);
         applyFilters();
     } catch (e) {
         console.error('Failed to load download status:', e);
         document.getElementById('status-tbody').innerHTML =
-            '<tr><td colspan="8" class="text-center py-8 text-red-500">Failed to load data</td></tr>';
+            '<tr><td colspan="9" class="text-center py-8 text-red-500">Failed to load data</td></tr>';
     }
+}
+
+// ── Pagination controls ──
+function updatePagination(total, page, pages) {
+    const controls = document.getElementById('pagination-controls');
+    if (pages <= 1) {
+        controls.classList.add('hidden');
+        return;
+    }
+    controls.classList.remove('hidden');
+
+    document.getElementById('pagination-info').textContent =
+        `Showing ${(page - 1) * perPage + 1}-${Math.min(page * perPage, total)} of ${total}`;
+
+    document.getElementById('btn-prev').disabled = page <= 1;
+    document.getElementById('btn-next').disabled = page >= pages;
+
+    // Page number buttons
+    const pageNums = document.getElementById('page-numbers');
+    pageNums.innerHTML = '';
+    const start = Math.max(1, page - 2);
+    const end = Math.min(pages, page + 2);
+    for (let i = start; i <= end; i++) {
+        const btn = document.createElement('button');
+        btn.className = `btn btn-xs ${i === page ? 'btn-primary' : 'btn-ghost'}`;
+        btn.textContent = i;
+        btn.onclick = () => goToPage(i);
+        pageNums.appendChild(btn);
+    }
+}
+
+function goToPage(page) {
+    if (page < 1 || page > totalPages) return;
+    loadData(page);
+}
+
+function changePerPage() {
+    perPage = parseInt(document.getElementById('per-page-select').value) || 0;
+    usePagination = perPage > 0;
+    currentPage = 1;
+    loadData();
 }
 
 // ── Apply client-side status filter ──
@@ -158,6 +246,7 @@ function applyFilters() {
     updateSummary(filtered);
     renderTable(filtered);
     updateResumeAllButton(filtered);
+    loadCompleteness();
 }
 
 // ── Update summary cards ──
@@ -184,7 +273,7 @@ function renderTable(data) {
     const tbody = document.getElementById('status-tbody');
 
     if (data.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="8" class="text-center py-8 text-gray-400">No data found</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="9" class="text-center py-8 text-gray-400">No data found</td></tr>';
         return;
     }
 
@@ -230,6 +319,7 @@ function renderTable(data) {
                     <span class="text-xs text-gray-600">${r.pct}%</span>
                 </div>
             </td>
+            <td class="text-center"><span class="text-xs font-mono" id="comp-${escAttr(r.instrument_key)}-${r.expiry_date}">-</span></td>
             <td class="text-center"><span class="badge badge-sm ${badgeClass}">${badgeLabel}</span></td>
             <td class="text-center">${actions}</td>
         </tr>`;
@@ -242,10 +332,7 @@ function esc(s) {
     d.textContent = s;
     return d.innerHTML;
 }
-function escAttr(s) {
-    if (!s) return '';
-    return String(s).replace(/&/g,'&amp;').replace(/'/g,'&#39;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-}
+// escAttr is defined globally in base.html
 
 // ── View Missing Contracts ──
 async function viewMissing(instrumentKey, expiryDate, instrumentName) {
@@ -393,6 +480,28 @@ async function retryFailedContracts() {
         }
     } catch (e) {
         showToast('Error: ' + e.message, 'error');
+    }
+}
+
+// ── Load completeness scores ──
+async function loadCompleteness() {
+    try {
+        const instrument = document.getElementById('filter-instrument').value;
+        const url = instrument ? `/api/quality/completeness?instrument_key=${encodeURIComponent(instrument)}` : '/api/quality/completeness';
+        const res = await fetch(url);
+        const scores = await res.json();
+
+        scores.forEach(s => {
+            const el = document.getElementById(`comp-${s.instrument_key}-${s.expiry}`);
+            if (el) {
+                const pct = s.completeness_pct;
+                const color = pct >= 90 ? 'text-green-600' : pct >= 50 ? 'text-yellow-600' : 'text-red-600';
+                el.className = `text-xs font-mono ${color}`;
+                el.textContent = `${pct}%`;
+            }
+        });
+    } catch (e) {
+        console.error('Failed to load completeness:', e);
     }
 }
 

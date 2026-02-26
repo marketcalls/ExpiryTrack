@@ -221,6 +221,45 @@
             from { transform: translateX(0); opacity: 1; }
             to { transform: translateX(100%); opacity: 0; }
         }
+
+        /* Command palette styles */
+        .cmd-palette-backdrop {
+            background: rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(4px);
+        }
+        .cmd-palette-item {
+            padding: 10px 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            transition: background 0.15s ease;
+        }
+        .cmd-palette-item:hover,
+        .cmd-palette-item.active {
+            background: #ecfdf5;
+        }
+        [data-theme="dark"] .cmd-palette-item:hover,
+        [data-theme="dark"] .cmd-palette-item.active {
+            background: #1a3a2a;
+        }
+        .cmd-palette-item .cmd-shortcut {
+            margin-left: auto;
+            font-size: 0.75rem;
+            color: #9ca3af;
+            font-family: monospace;
+        }
+
+        /* Breadcrumb styles */
+        .breadcrumbs-bar {
+            border-bottom: 1px solid #e5e7eb;
+            background: #f9fafb;
+        }
+        [data-theme="dark"] .breadcrumbs-bar {
+            background: #16213e;
+            border-bottom-color: #2d3748;
+        }
     </style>
 </head>
 <body class="min-h-screen" style="background-color: #fafafa;">
@@ -254,8 +293,18 @@
                         </label>
                         <ul tabindex="0" class="dropdown-content z-[51] menu p-2 shadow-lg bg-base-100 border border-base-300 rounded-lg w-48 mt-2">
                             <li><a href="{{ url_for('analytics.analytics_page') }}">Analytics</a></li>
+                            <li><a href="{{ url_for('analytics.option_chain_page') }}">Option Chain</a></li>
+                            <li><a href="{{ url_for('analytics.oi_analysis_page') }}">OI Analysis</a></li>
+                            <li><a href="{{ url_for('analytics.chart_viewer_page') }}">Charts</a></li>
+                            <li><a href="{{ url_for('analytics.expiry_comparison_page') }}">Expiry Comparison</a></li>
+                            <li><a href="{{ url_for('analytics.calendar_page') }}">Calendar</a></li>
+                            <li><a href="{{ url_for('backtest.backtest_page') }}">Backtest</a></li>
                             <li><a href="{{ url_for('status.download_status_page') }}">Download Status</a></li>
                             <li><a href="{{ url_for('status.status_page') }}">Status</a></li>
+                            <li class="border-t border-base-200 mt-1 pt-1"></li>
+                            <li><a href="{{ url_for('admin.data_management_page') }}">Data Management</a></li>
+                            <li><a href="{{ url_for('admin.import_page') }}">Import Data</a></li>
+                            <li><a href="{{ url_for('admin.data_comparison_page') }}">Data Comparison</a></li>
                             <li class="border-t border-base-200 mt-1 pt-1"></li>
                             <li><a href="{{ url_for('auth.settings') }}">Settings</a></li>
                             <li><a href="{{ url_for('help_page') }}">Help</a></li>
@@ -290,6 +339,28 @@
                                     <span id="collection-badge-action" class="truncate ml-2 text-right">Idle</span>
                                 </div>
                                 <a href="{{ url_for('status.status_page') }}" class="btn btn-xs btn-outline btn-success mt-2">View Status</a>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Notification Bell (D14) -->
+                    <div class="dropdown dropdown-end" id="notification-bell">
+                        <div tabindex="0" role="button" class="btn btn-ghost btn-sm btn-circle relative" title="Notifications">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                      d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/>
+                            </svg>
+                            <span id="notif-badge" class="absolute -top-1 -right-1 badge badge-xs badge-error hidden">0</span>
+                        </div>
+                        <div tabindex="0" class="dropdown-content z-[51] card card-compact w-80 shadow-lg bg-base-100 border border-base-300 mt-2">
+                            <div class="card-body p-0">
+                                <div class="flex items-center justify-between px-4 py-3 border-b border-base-200">
+                                    <h3 class="font-semibold text-sm">Notifications</h3>
+                                    <button onclick="markAllNotificationsRead()" class="btn btn-ghost btn-xs text-success">Mark all read</button>
+                                </div>
+                                <div id="notif-list" class="max-h-72 overflow-y-auto">
+                                    <div class="px-4 py-6 text-center text-sm text-gray-400">No notifications</div>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -329,8 +400,18 @@
                             {% if is_authenticated %}
                             <li class="border-t border-base-200 mt-1 pt-1"></li>
                             <li><a href="{{ url_for('analytics.analytics_page') }}">Analytics</a></li>
+                            <li><a href="{{ url_for('analytics.option_chain_page') }}">Option Chain</a></li>
+                            <li><a href="{{ url_for('analytics.oi_analysis_page') }}">OI Analysis</a></li>
+                            <li><a href="{{ url_for('analytics.chart_viewer_page') }}">Charts</a></li>
+                            <li><a href="{{ url_for('analytics.expiry_comparison_page') }}">Expiry Comparison</a></li>
+                            <li><a href="{{ url_for('analytics.calendar_page') }}">Calendar</a></li>
+                            <li><a href="{{ url_for('backtest.backtest_page') }}">Backtest</a></li>
                             <li><a href="{{ url_for('status.download_status_page') }}">Download Status</a></li>
                             <li><a href="{{ url_for('status.status_page') }}">Status</a></li>
+                            <li class="border-t border-base-200 mt-1 pt-1"></li>
+                            <li><a href="{{ url_for('admin.data_management_page') }}">Data Management</a></li>
+                            <li><a href="{{ url_for('admin.import_page') }}">Import Data</a></li>
+                            <li><a href="{{ url_for('admin.data_comparison_page') }}">Data Comparison</a></li>
                             {% endif %}
                             <li class="border-t border-base-200 mt-1 pt-1"></li>
                             <li><a href="{{ url_for('auth.settings') }}">Settings</a></li>
@@ -368,6 +449,46 @@
             </div>
         {% endif %}
     {% endwith %}
+
+    <!-- Breadcrumbs -->
+    {% set breadcrumb_content %}{% block breadcrumbs %}{% endblock %}{% endset %}
+    {% if breadcrumb_content.strip() %}
+    <div class="breadcrumbs-bar">
+        <div class="container mx-auto px-4 py-2">
+            <div class="text-sm breadcrumbs">
+                <ul>
+                    <li><a href="{{ url_for('index') }}" class="text-gray-500 hover:text-green-600">Home</a></li>
+                    {{ breadcrumb_content }}
+                </ul>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Command Palette Modal (D9) -->
+    <div id="cmd-palette" class="fixed inset-0 z-[200] hidden cmd-palette-backdrop" onclick="if(event.target===this)closeCmdPalette()">
+        <div class="container mx-auto px-4 mt-[15vh]">
+            <div class="max-w-lg mx-auto card-minimal overflow-hidden shadow-2xl">
+                <div class="p-4 border-b border-gray-200">
+                    <div class="flex items-center gap-3">
+                        <svg class="w-5 h-5 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                        </svg>
+                        <input id="cmd-search" type="text" placeholder="Search pages and actions..." class="w-full bg-transparent border-none outline-none text-base" autocomplete="off" oninput="filterCmdPalette(this.value)">
+                        <kbd class="kbd kbd-sm text-xs shrink-0">Esc</kbd>
+                    </div>
+                </div>
+                <div id="cmd-results" class="max-h-80 overflow-y-auto p-2">
+                    <!-- Items populated by JS -->
+                </div>
+                <div class="p-3 border-t border-gray-200 text-xs text-gray-400 flex items-center gap-4">
+                    <span>Navigate with <kbd class="kbd kbd-xs">Up</kbd> <kbd class="kbd kbd-xs">Down</kbd></span>
+                    <span>Open with <kbd class="kbd kbd-xs">Enter</kbd></span>
+                    <span class="ml-auto">G then key for quick nav</span>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <!-- Main Content -->
     <main class="container mx-auto px-4 py-8">
@@ -474,6 +595,11 @@
         var div = document.createElement('div');
         div.textContent = text;
         return div.innerHTML;
+    }
+
+    function escAttr(s) {
+        if (!s) return '';
+        return String(s).replace(/&/g,'&amp;').replace(/'/g,'&#39;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
     }
 
     // Global fetch wrapper — auto-includes CSRF token on mutating requests
@@ -606,6 +732,124 @@
         }, 60000);
     })();
     </script>
+
+    <!-- Notification Bell Logic (D14) -->
+    <script>
+    (function() {
+        var NOTIF_ICON_MAP = {
+            collection_complete: { cls: 'text-success', sym: 'C' },
+            collection_failed:  { cls: 'text-error',   sym: '!' },
+            token_expiring:     { cls: 'text-warning',  sym: 'T' },
+            quality_issue:      { cls: 'text-info',     sym: 'Q' }
+        };
+
+        function renderNotifications(notifications) {
+            var list = document.getElementById('notif-list');
+            if (!list) return;
+            if (!notifications || notifications.length === 0) {
+                list.innerHTML = '<div class="px-4 py-6 text-center text-sm text-gray-400">No notifications</div>';
+                return;
+            }
+            var html = '';
+            notifications.forEach(function(n) {
+                var icon = NOTIF_ICON_MAP[n.type] || { cls: 'text-gray-500', sym: 'N' };
+                var readCls = n.read ? 'opacity-60' : '';
+                var dot = n.read ? '' : '<span class="w-2 h-2 rounded-full bg-success shrink-0"></span>';
+                var ago = timeAgo(n.created_at);
+                html += '<div class="flex items-start gap-3 px-4 py-3 hover:bg-base-200 cursor-pointer border-b border-base-200 ' + readCls + '" onclick="markNotificationRead(' + n.id + ', this)">' +
+                    '<span class="w-8 h-8 rounded-full bg-base-200 flex items-center justify-center text-xs font-bold shrink-0 ' + icon.cls + '">' + icon.sym + '</span>' +
+                    '<div class="flex-1 min-w-0">' +
+                        '<div class="text-sm font-medium truncate">' + escapeHtml(n.title) + '</div>' +
+                        (n.message ? '<div class="text-xs text-gray-500 truncate">' + escapeHtml(n.message) + '</div>' : '') +
+                        '<div class="text-xs text-gray-400 mt-0.5">' + ago + '</div>' +
+                    '</div>' +
+                    dot +
+                '</div>';
+            });
+            list.innerHTML = html;
+        }
+
+        function updateBadge(count) {
+            var badge = document.getElementById('notif-badge');
+            if (!badge) return;
+            if (count > 0) {
+                badge.textContent = count > 99 ? '99+' : count;
+                badge.classList.remove('hidden');
+            } else {
+                badge.classList.add('hidden');
+            }
+        }
+
+        function timeAgo(dateStr) {
+            if (!dateStr) return '';
+            var now = new Date();
+            var d = new Date(dateStr);
+            var diff = Math.floor((now - d) / 1000);
+            if (diff < 60) return 'just now';
+            if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+            if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
+            return Math.floor(diff / 86400) + 'd ago';
+        }
+
+        function fetchNotifications() {
+            fetch('/api/notifications')
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    renderNotifications(data.notifications || []);
+                })
+                .catch(function() {});
+
+            fetch('/api/notifications/unread-count')
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    updateBadge(data.count || 0);
+                })
+                .catch(function() {});
+        }
+
+        window.markNotificationRead = function(id, el) {
+            fetch('/api/notifications/mark-read', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id: id })
+            }).then(function() {
+                if (el) el.classList.add('opacity-60');
+                var dot = el && el.querySelector('.bg-success');
+                if (dot) dot.remove();
+                fetchNotifications();
+            }).catch(function() {});
+        };
+
+        window.markAllNotificationsRead = function() {
+            fetch('/api/notifications/mark-read', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ all: true })
+            }).then(function() {
+                fetchNotifications();
+            }).catch(function() {});
+        };
+
+        // Listen for SSE notification events
+        function listenForNotifications() {
+            var checkSSE = setInterval(function() {
+                if (window._sseSource) {
+                    clearInterval(checkSSE);
+                    window._sseSource.addEventListener('notification:new', function() {
+                        fetchNotifications();
+                    });
+                }
+            }, 500);
+        }
+
+        // Initial load
+        fetchNotifications();
+        listenForNotifications();
+
+        // Poll every 60 seconds as fallback
+        setInterval(fetchNotifications, 60000);
+    })();
+    </script>
     {% endif %}
 
     <!-- htmx CSRF token configuration -->
@@ -614,6 +858,173 @@
         var token = document.querySelector('meta[name="csrf-token"]');
         if (token) evt.detail.headers['X-CSRFToken'] = token.getAttribute('content');
     });
+    </script>
+
+    <!-- Command Palette & Keyboard Shortcuts (D9) -->
+    <script>
+    (function() {
+        // Command palette items — label, url, shortcut hint, icon
+        var cmdItems = [
+            { label: 'Home',            url: '/',                icon: 'H', shortcut: 'G H' },
+            { label: 'Collect Data',    url: '/collect',         icon: 'C', shortcut: 'G C' },
+            { label: 'Export Data',     url: '/export',          icon: 'E', shortcut: 'G E' },
+            { label: 'Analytics',       url: '/analytics',       icon: 'A', shortcut: 'G A' },
+            { label: 'Download Status', url: '/download-status', icon: 'D', shortcut: '' },
+            { label: 'Status',          url: '/status',          icon: 'S', shortcut: 'G S' },
+            { label: 'Option Chain',    url: '/option-chain',    icon: 'O', shortcut: '' },
+            { label: 'Charts',          url: '/chart',           icon: 'V', shortcut: '' },
+            { label: 'OI Analysis',     url: '/oi-analysis',     icon: 'I', shortcut: '' },
+            { label: 'Calendar',        url: '/calendar',        icon: 'L', shortcut: '' },
+            { label: 'Instruments',     url: '/instruments',     icon: 'N', shortcut: '' },
+            { label: 'Settings',        url: '/settings',        icon: 'G', shortcut: '' },
+            { label: 'Help',            url: '/help',            icon: '?', shortcut: '' }
+        ];
+
+        var activeIdx = 0;
+        var filteredItems = cmdItems.slice();
+
+        function renderCmdResults() {
+            var container = document.getElementById('cmd-results');
+            if (!container) return;
+            container.innerHTML = '';
+            filteredItems.forEach(function(item, i) {
+                var div = document.createElement('div');
+                div.className = 'cmd-palette-item' + (i === activeIdx ? ' active' : '');
+                div.setAttribute('data-index', i);
+                div.innerHTML =
+                    '<span class="w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center text-sm font-bold text-gray-600 shrink-0">' +
+                    escapeHtml(item.icon) + '</span>' +
+                    '<span class="font-medium text-sm">' + escapeHtml(item.label) + '</span>' +
+                    (item.shortcut ? '<span class="cmd-shortcut">' + escapeHtml(item.shortcut) + '</span>' : '');
+                div.onclick = function() { window.location.href = item.url; };
+                div.onmouseenter = function() {
+                    activeIdx = i;
+                    highlightActive();
+                };
+                container.appendChild(div);
+            });
+        }
+
+        function highlightActive() {
+            var items = document.querySelectorAll('#cmd-results .cmd-palette-item');
+            items.forEach(function(el, i) {
+                if (i === activeIdx) {
+                    el.classList.add('active');
+                    el.scrollIntoView({ block: 'nearest' });
+                } else {
+                    el.classList.remove('active');
+                }
+            });
+        }
+
+        window.filterCmdPalette = function(query) {
+            var q = query.toLowerCase().trim();
+            if (!q) {
+                filteredItems = cmdItems.slice();
+            } else {
+                filteredItems = cmdItems.filter(function(item) {
+                    return item.label.toLowerCase().indexOf(q) !== -1;
+                });
+            }
+            activeIdx = 0;
+            renderCmdResults();
+        };
+
+        window.openCmdPalette = function() {
+            var palette = document.getElementById('cmd-palette');
+            var searchInput = document.getElementById('cmd-search');
+            if (!palette) return;
+            palette.classList.remove('hidden');
+            filteredItems = cmdItems.slice();
+            activeIdx = 0;
+            renderCmdResults();
+            searchInput.value = '';
+            setTimeout(function() { searchInput.focus(); }, 50);
+        };
+
+        window.closeCmdPalette = function() {
+            var palette = document.getElementById('cmd-palette');
+            if (palette) palette.classList.add('hidden');
+        };
+
+        // Keyboard navigation inside the palette
+        document.addEventListener('keydown', function(e) {
+            var palette = document.getElementById('cmd-palette');
+            var isOpen = palette && !palette.classList.contains('hidden');
+
+            if (isOpen) {
+                if (e.key === 'Escape') {
+                    e.preventDefault();
+                    closeCmdPalette();
+                    return;
+                }
+                if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    activeIdx = (activeIdx + 1) % filteredItems.length;
+                    highlightActive();
+                    return;
+                }
+                if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    activeIdx = (activeIdx - 1 + filteredItems.length) % filteredItems.length;
+                    highlightActive();
+                    return;
+                }
+                if (e.key === 'Enter' && filteredItems.length > 0) {
+                    e.preventDefault();
+                    window.location.href = filteredItems[activeIdx].url;
+                    return;
+                }
+                // Let other keys pass through to the search input
+                return;
+            }
+        });
+
+        // Global shortcuts: Ctrl+K / Cmd+K and G-then-key sequences
+        var gPending = false;
+        var gTimer = null;
+
+        document.addEventListener('keydown', function(e) {
+            var palette = document.getElementById('cmd-palette');
+            var isOpen = palette && !palette.classList.contains('hidden');
+            if (isOpen) return; // Handled above
+
+            // Skip if user is in an input, textarea, select, or contenteditable
+            var tag = (e.target.tagName || '').toLowerCase();
+            if (tag === 'input' || tag === 'textarea' || tag === 'select' || e.target.isContentEditable) return;
+
+            // Ctrl+K / Cmd+K — open command palette
+            if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+                e.preventDefault();
+                openCmdPalette();
+                return;
+            }
+
+            // G-then-key navigation
+            if (gPending) {
+                gPending = false;
+                clearTimeout(gTimer);
+                var routes = {
+                    'h': '/',
+                    'c': '/collect',
+                    'e': '/export',
+                    'a': '/analytics',
+                    's': '/status'
+                };
+                var key = e.key.toLowerCase();
+                if (routes[key]) {
+                    e.preventDefault();
+                    window.location.href = routes[key];
+                }
+                return;
+            }
+
+            if (e.key === 'g' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+                gPending = true;
+                gTimer = setTimeout(function() { gPending = false; }, 800);
+            }
+        });
+    })();
     </script>
 
     {% block scripts %}{% endblock %}

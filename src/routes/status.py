@@ -46,12 +46,15 @@ def download_status_page() -> str | Response:
 @status_bp.route("/api/download-status")
 @require_auth
 def api_download_status() -> Response:
-    """List all expiries with download status."""
+    """List all expiries with download status. Supports ?page=1&per_page=50."""
     from src.analytics.engine import AnalyticsEngine
 
     instrument = request.args.get("instrument")
+    page = max(0, request.args.get("page", 0, type=int))
+    per_page = min(max(0, request.args.get("per_page", 0, type=int)), 500)
+
     engine = AnalyticsEngine(current_app.db_manager)
-    return jsonify(engine.get_download_status(instrument))
+    return jsonify(engine.get_download_status(instrument, page=page, per_page=per_page))
 
 
 @status_bp.route("/api/download-status/<path:instrument_key>/<expiry_date>/missing")
@@ -97,7 +100,10 @@ def api_download_status_resume() -> tuple[Response, int] | Response:
         "interval": "1minute",
         "workers": 5,
     }
-    task_id = task_manager.create_task(task_params)
+    try:
+        task_id = task_manager.create_task(task_params)
+    except ValueError as e:
+        return jsonify({"success": False, "error": str(e)}), 409
     return jsonify({"success": True, "task_id": task_id})
 
 
@@ -145,3 +151,52 @@ def api_quality_run() -> Response:
     checker = DataQualityChecker(current_app.db_manager)
     report = checker.run_all_checks(instrument_key)
     return jsonify(report.to_dict())
+
+
+@status_bp.route("/api/quality/fix", methods=["POST"])
+@require_auth
+def api_quality_fix() -> Response:
+    """Auto-fix common quality violations."""
+    from src.quality.checker import DataQualityChecker
+
+    instrument_key = None
+    if request.json:
+        instrument_key = request.json.get("instrument_key")
+    checker = DataQualityChecker(current_app.db_manager)
+    fixes = checker.fix_violations(instrument_key)
+    return jsonify({"success": True, **fixes})
+
+
+@status_bp.route("/api/quality/market-hours")
+@require_auth
+def api_quality_market_hours() -> Response:
+    """Check for candles outside market hours."""
+    from src.quality.checker import DataQualityChecker
+
+    instrument_key = request.args.get("instrument_key")
+    checker = DataQualityChecker(current_app.db_manager)
+    results = checker.check_market_hours(instrument_key)
+    return jsonify(results)
+
+
+@status_bp.route("/api/quality/completeness")
+@require_auth
+def api_quality_completeness() -> Response:
+    """Get completeness scores for all instrument+expiry combos."""
+    from src.quality.checker import DataQualityChecker
+
+    instrument_key = request.args.get("instrument_key")
+    checker = DataQualityChecker(current_app.db_manager)
+    scores = checker.get_completeness_bulk(instrument_key)
+    return jsonify(scores)
+
+
+@status_bp.route("/api/quality/reports")
+@require_auth
+def api_quality_reports() -> Response:
+    """Get recent quality check reports."""
+    from src.quality.checker import DataQualityChecker
+
+    checker = DataQualityChecker(current_app.db_manager)
+    reports = checker.get_recent_reports()
+    return jsonify(reports)

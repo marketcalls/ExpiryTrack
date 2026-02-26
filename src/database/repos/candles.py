@@ -51,7 +51,7 @@ class CandleRepository(BaseRepository):
                 """,
                     (instrument_key, interval, instrument_key, interval, instrument_key, interval),
                 )
-                conn.commit()
+                # NOTE: do NOT call conn.commit() here — get_connection() commits on exit
                 count = len(data_rows)
                 logger.info(f"Inserted {count} candles for {instrument_key} ({interval})")
                 return count

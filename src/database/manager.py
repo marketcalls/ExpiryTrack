@@ -120,10 +120,15 @@ class DatabaseManager:
 
     # Class-level lock shared across all instances for DuckDB single-writer serialization
     _write_lock = threading.Lock()
+    _read_pool_max = 3
 
     def __init__(self, db_path: Path | None = None):
         self.db_path = db_path or config.DB_PATH
         self.db_type = config.DB_TYPE
+
+        # Instance-level read connection pool (avoids cross-instance contamination in tests)
+        self._read_pool: list[Any] = []
+        self._read_pool_lock = threading.Lock()
 
         # Create database directory if needed
         self.db_path.parent.mkdir(exist_ok=True, parents=True)
@@ -133,9 +138,11 @@ class DatabaseManager:
 
         # Compose repository instances
         from .repos import (
+            BacktestRepository,
             CandleRepository,
             ContractRepository,
             CredentialRepository,
+            ExportsRepo,
             HistoricalDataRepository,
             InstrumentMasterRepository,
             InstrumentRepository,
@@ -153,6 +160,8 @@ class DatabaseManager:
         self.watchlists = WatchlistRepository(self)
         self.jobs = JobRepository(self)
         self.tasks_repo = TaskRepository(self)
+        self.exports_repo = ExportsRepo(self)
+        self.backtests = BacktestRepository(self)
 
     @contextmanager
     def get_connection(self) -> Generator[Any, None, None]:
@@ -183,17 +192,33 @@ class DatabaseManager:
     def get_read_connection(self) -> Generator[Any, None, None]:
         """Context manager for read-only database connections.
 
+        Uses a simple connection pool (max 3) to reduce connection overhead.
         No write lock needed — DuckDB allows concurrent reads.
-        Uses same connection config as get_connection() to avoid
-        DuckDB's "different configuration" error when both are open.
         """
         conn = None
         try:
-            conn = duckdb.connect(str(self.db_path))
+            with self._read_pool_lock:
+                if self._read_pool:
+                    conn = self._read_pool.pop()
+            if conn is None:
+                conn = duckdb.connect(str(self.db_path))
             yield conn
-        finally:
+        except Exception:
+            # On error, don't return connection to pool
             if conn:
-                conn.close()
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+            conn = None
+            raise
+        finally:
+            if conn is not None:
+                with self._read_pool_lock:
+                    if len(self._read_pool) < self._read_pool_max:
+                        self._read_pool.append(conn)
+                    else:
+                        conn.close()
 
     def _table_exists(self, conn: Any, table_name: str) -> bool:
         """Check if a table exists using information_schema"""

@@ -1,0 +1,163 @@
+{% extends "base.html" %}
+
+{% block title %}Option Chain - ExpiryTrack{% endblock %}
+
+{% block breadcrumbs %}<li><a href="{{ url_for('analytics.analytics_page') }}" class="text-gray-500 hover:text-green-600">Analytics</a></li><li class="text-gray-700 font-medium">Option Chain</li>{% endblock %}
+
+{% block content %}
+<div class="max-w-7xl mx-auto">
+    <div class="flex items-center justify-between mb-6">
+        <h1 class="text-3xl font-bold supabase-text-gradient">Option Chain Explorer</h1>
+    </div>
+
+    <!-- Filters -->
+    <div class="card-minimal p-4 mb-6">
+        <div class="flex flex-wrap items-end gap-4">
+            <div>
+                <label class="text-sm text-gray-500 font-medium block mb-1">Instrument</label>
+                <select id="oc-instrument" onchange="loadExpiryDates()" class="select select-bordered select-sm w-56">
+                    <option value="">Select Instrument</option>
+                </select>
+            </div>
+            <div>
+                <label class="text-sm text-gray-500 font-medium block mb-1">Expiry Date</label>
+                <select id="oc-expiry" onchange="loadOptionChain()" class="select select-bordered select-sm w-44">
+                    <option value="">Select Expiry</option>
+                </select>
+            </div>
+            <button onclick="loadOptionChain()" class="btn-supabase text-sm">Load</button>
+        </div>
+    </div>
+
+    <!-- Option Chain Table -->
+    <div class="card-minimal overflow-hidden">
+        <div class="overflow-x-auto">
+            <table class="table table-sm w-full" id="oc-table">
+                <thead>
+                    <tr class="bg-gray-50">
+                        <th colspan="6" class="text-center bg-green-50 text-green-700 font-semibold border-r border-gray-300">CALLS (CE)</th>
+                        <th class="text-center bg-gray-100 font-bold">Strike</th>
+                        <th colspan="6" class="text-center bg-red-50 text-red-700 font-semibold border-l border-gray-300">PUTS (PE)</th>
+                    </tr>
+                    <tr class="text-xs text-gray-500 uppercase tracking-wider">
+                        <th class="text-right">OI</th>
+                        <th class="text-right">Volume</th>
+                        <th class="text-right">Open</th>
+                        <th class="text-right">High</th>
+                        <th class="text-right">Low</th>
+                        <th class="text-right border-r border-gray-300">Close</th>
+                        <th class="text-center bg-gray-50 font-bold">Strike</th>
+                        <th class="text-right border-l border-gray-300">Close</th>
+                        <th class="text-right">Low</th>
+                        <th class="text-right">High</th>
+                        <th class="text-right">Open</th>
+                        <th class="text-right">Volume</th>
+                        <th class="text-right">OI</th>
+                    </tr>
+                </thead>
+                <tbody id="oc-tbody">
+                    <tr>
+                        <td colspan="13" class="text-center py-8 text-gray-400">Select an instrument and expiry to view option chain</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function fmt(n) { return n != null ? n.toLocaleString() : '-'; }
+function fmtPrice(n) { return n != null ? n.toFixed(2) : '-'; }
+
+async function loadInstruments() {
+    try {
+        const res = await fetch('/api/analytics/instruments-with-data');
+        const data = await res.json();
+        const sel = document.getElementById('oc-instrument');
+        (data.instruments || []).forEach(inst => {
+            const opt = document.createElement('option');
+            opt.value = inst.instrument_key;
+            opt.textContent = inst.symbol;
+            sel.appendChild(opt);
+        });
+    } catch (e) { console.error('Failed to load instruments:', e); }
+}
+
+async function loadExpiryDates() {
+    const instrument = document.getElementById('oc-instrument').value;
+    const sel = document.getElementById('oc-expiry');
+    sel.innerHTML = '<option value="">Select Expiry</option>';
+    if (!instrument) return;
+
+    try {
+        const res = await fetch(`/api/analytics/expiry-dates?instrument=${encodeURIComponent(instrument)}`);
+        const data = await res.json();
+        (data.dates || []).forEach(d => {
+            const opt = document.createElement('option');
+            opt.value = d;
+            opt.textContent = d;
+            sel.appendChild(opt);
+        });
+    } catch (e) { console.error('Failed to load expiry dates:', e); }
+}
+
+async function loadOptionChain() {
+    const instrument = document.getElementById('oc-instrument').value;
+    const expiry = document.getElementById('oc-expiry').value;
+    const tbody = document.getElementById('oc-tbody');
+
+    if (!instrument || !expiry) {
+        tbody.innerHTML = '<tr><td colspan="13" class="text-center py-8 text-gray-400">Select an instrument and expiry</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = '<tr><td colspan="13" class="text-center py-8 text-gray-400">Loading...</td></tr>';
+
+    try {
+        const res = await fetch(`/api/analytics/option-chain?instrument=${encodeURIComponent(instrument)}&expiry=${encodeURIComponent(expiry)}`);
+        const data = await res.json();
+        const contracts = data.data || [];
+
+        // Group by strike
+        const strikes = {};
+        contracts.forEach(c => {
+            if (!strikes[c.strike_price]) strikes[c.strike_price] = {};
+            strikes[c.strike_price][c.contract_type] = c;
+        });
+
+        const sortedStrikes = Object.keys(strikes).map(Number).sort((a, b) => a - b);
+
+        if (sortedStrikes.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="13" class="text-center py-8 text-gray-400">No option chain data available</td></tr>';
+            return;
+        }
+
+        tbody.innerHTML = sortedStrikes.map(strike => {
+            const ce = strikes[strike]['CE'] || {};
+            const pe = strikes[strike]['PE'] || {};
+            return `<tr class="hover:bg-gray-50">
+                <td class="text-right text-sm ${ce.last_oi ? 'font-medium' : 'text-gray-300'}">${fmt(ce.last_oi)}</td>
+                <td class="text-right text-sm">${fmt(ce.last_volume)}</td>
+                <td class="text-right text-sm">${fmtPrice(ce.last_open)}</td>
+                <td class="text-right text-sm">${fmtPrice(ce.last_high)}</td>
+                <td class="text-right text-sm">${fmtPrice(ce.last_low)}</td>
+                <td class="text-right text-sm border-r border-gray-300 ${ce.last_close ? 'font-medium text-green-700' : 'text-gray-300'}">${fmtPrice(ce.last_close)}</td>
+                <td class="text-center bg-gray-50 font-bold text-sm">${strike.toLocaleString()}</td>
+                <td class="text-right text-sm border-l border-gray-300 ${pe.last_close ? 'font-medium text-red-700' : 'text-gray-300'}">${fmtPrice(pe.last_close)}</td>
+                <td class="text-right text-sm">${fmtPrice(pe.last_low)}</td>
+                <td class="text-right text-sm">${fmtPrice(pe.last_high)}</td>
+                <td class="text-right text-sm">${fmtPrice(pe.last_open)}</td>
+                <td class="text-right text-sm">${fmt(pe.last_volume)}</td>
+                <td class="text-right text-sm ${pe.last_oi ? 'font-medium' : 'text-gray-300'}">${fmt(pe.last_oi)}</td>
+            </tr>`;
+        }).join('');
+    } catch (e) {
+        tbody.innerHTML = `<tr><td colspan="13" class="text-center py-8 text-red-500">Error: ${e.message}</td></tr>`;
+    }
+}
+
+document.addEventListener('DOMContentLoaded', loadInstruments);
+</script>
+{% endblock %}

@@ -37,48 +37,80 @@ class UpstoxRateLimiter:
         self.request_count = 0
         self.error_count = 0
         self.backoff_factor = 1.0
+        self._backoff_until: float = 0.0  # epoch seconds; all workers pause until this time
 
     async def acquire(self, priority: int = 1) -> None:
         """
-        Wait if necessary to respect rate limits
+        Wait if necessary to respect rate limits.
+
+        Long waits (e.g. 30-minute window) are broken into shorter sleeps
+        so the lock is released periodically and progress is visible.
 
         Args:
             priority: Request priority (lower = higher priority)
         """
-        async with self.lock:
-            now = time.time()
-
-            # Clean old timestamps from windows
-            for window_name, (_limit, duration) in self.limits.items():
-                window = self.windows[window_name]
-                while window and now - window[0] > duration:
-                    window.popleft()
-
-            # Check if we need to wait
-            wait_time = 0.0
-            for window_name, (limit, duration) in self.limits.items():
-                window = self.windows[window_name]
-                effective_limit = int(limit / self.backoff_factor)
-
-                if len(window) >= effective_limit:
-                    oldest = window[0]
-                    wait_needed = duration - (now - oldest) + 0.01
-                    wait_time = max(wait_time, wait_needed)
-
-                    logger.debug(
-                        f"Rate limit {window_name}: {len(window)}/{effective_limit}, waiting {wait_needed:.2f}s"
-                    )
-
-            if wait_time > 0:
-                logger.info(f"Rate limit reached, waiting {wait_time:.2f}s")
-                await asyncio.sleep(wait_time)
+        while True:
+            async with self.lock:
                 now = time.time()
 
-            # Record the request timestamp
-            for window in self.windows.values():
-                window.append(now)
+                # Honour global backoff set by a previous 429 response
+                if now < self._backoff_until:
+                    wait_time = self._backoff_until - now
+                    logger.debug(f"Global backoff active, waiting {wait_time:.1f}s")
+                    await asyncio.sleep(min(wait_time, 30.0))
+                    if wait_time <= 30.0:
+                        now = time.time()
+                    else:
+                        continue  # Re-acquire lock and re-check
 
-            self.request_count += 1
+                # Clean old timestamps from windows
+                for window_name, (_limit, duration) in self.limits.items():
+                    window = self.windows[window_name]
+                    while window and now - window[0] > duration:
+                        window.popleft()
+
+                # Check if we need to wait
+                wait_time = 0.0
+                blocking_window = ""
+                for window_name, (limit, duration) in self.limits.items():
+                    window = self.windows[window_name]
+                    effective_limit = int(limit / self.backoff_factor)
+
+                    if len(window) >= effective_limit:
+                        oldest = window[0]
+                        wait_needed = duration - (now - oldest) + 0.01
+                        if wait_needed > wait_time:
+                            wait_time = wait_needed
+                            blocking_window = window_name
+
+                if wait_time <= 0:
+                    # No wait needed — record the request and return
+                    for window in self.windows.values():
+                        window.append(now)
+                    self.request_count += 1
+                    return
+
+                # Cap the sleep to avoid holding the lock for too long.
+                # For short waits (< 5s), sleep inline. For long waits,
+                # release the lock, sleep a bit, and re-check.
+                if wait_time <= 5.0:
+                    logger.info(f"Rate limit reached ({blocking_window}), waiting {wait_time:.2f}s")
+                    await asyncio.sleep(wait_time)
+                    now = time.time()
+                    # Record and return
+                    for window in self.windows.values():
+                        window.append(now)
+                    self.request_count += 1
+                    return
+
+            # Long wait: release the lock, sleep briefly, then re-check
+            sleep_chunk = min(wait_time, 30.0)
+            logger.info(
+                f"Rate limit reached ({blocking_window}), need {wait_time:.0f}s — "
+                f"sleeping {sleep_chunk:.0f}s then re-checking"
+            )
+            await asyncio.sleep(sleep_chunk)
+            # Loop back to re-acquire lock and re-evaluate
 
     async def handle_response(self, status_code: int, headers: dict | None = None) -> None:
         """
@@ -92,18 +124,29 @@ class UpstoxRateLimiter:
             self.error_count += 1
             self.backoff_factor = min(2.0, 1.0 + (self.error_count * 0.1))
 
-            # Get retry-after header if available
-            retry_after = 60  # Default wait time
+            # Get retry-after header if available, capped to avoid excessive stalls
+            retry_after = 10  # Default wait time
             if headers and "retry-after" in headers:
-                retry_after = int(headers["retry-after"])
+                try:
+                    retry_after = int(headers["retry-after"])
+                except (ValueError, TypeError):
+                    pass
 
-            logger.warning(f"Rate limit exceeded (429), backing off for {retry_after}s")
-            await asyncio.sleep(retry_after)
+            # Cap to 30s max — API may send 600s but that stalls bulk collection
+            retry_after = min(retry_after, 30)
+
+            # Set a global backoff gate so ALL workers slow down together
+            new_backoff = time.time() + retry_after
+            if new_backoff > self._backoff_until:
+                self._backoff_until = new_backoff
+
+            logger.warning(f"Rate limit exceeded (429), all workers backing off for {retry_after}s")
 
         elif status_code < 400:  # Successful request
             if self.error_count > 0:
                 self.error_count -= 1
                 self.backoff_factor = max(1.0, self.backoff_factor - 0.05)
+            # _backoff_until is left to expire naturally; don't clear on single success
 
     def get_usage_stats(self) -> dict[str, dict]:
         """

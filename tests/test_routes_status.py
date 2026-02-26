@@ -59,7 +59,7 @@ def test_api_download_status_with_filter(authed_client):
         engine.get_download_status.return_value = []
         resp = authed_client.get("/api/download-status?instrument=NSE_INDEX|Nifty 50")
     assert resp.status_code == 200
-    engine.get_download_status.assert_called_once_with("NSE_INDEX|Nifty 50")
+    engine.get_download_status.assert_called_once_with("NSE_INDEX|Nifty 50", page=0, per_page=0)
 
 
 # ── API: missing contracts ──

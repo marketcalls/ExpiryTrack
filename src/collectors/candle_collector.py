@@ -160,12 +160,14 @@ class CandleCollector:
         return 0
 
     async def _collect_single(
-        self, instrument_key: str, unit: str, interval_val: int, interval_str: str, from_date: str, to_date: str
+        self, instrument_key: str, unit: str, interval_val: int, interval_str: str, from_date: str, to_date: str,
+        on_chunk_done=None,
     ) -> int:
         """Collect candles for a single instrument"""
         try:
             candles = await self.api_client.get_historical_candles_v3(
-                instrument_key=instrument_key, unit=unit, interval=interval_val, from_date=from_date, to_date=to_date
+                instrument_key=instrument_key, unit=unit, interval=interval_val, from_date=from_date, to_date=to_date,
+                on_chunk_done=on_chunk_done,
             )
 
             if candles:

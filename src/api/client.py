@@ -25,6 +25,15 @@ _V3_MAX_RANGE = {
     "months": 36500,  # monthly: unlimited
 }
 
+# Earliest date the V3 API actually has data for each unit
+DATA_AVAILABLE_FROM: dict[str, str] = {
+    "minutes": "2022-01-01",
+    "hours":   "2022-01-01",
+    "days":    "2000-01-01",
+    "weeks":   "2000-01-01",
+    "months":  "2000-01-01",
+}
+
 
 def _get_max_days(unit: str, interval: int) -> int:
     """Get max days per request for a given unit and interval"""
@@ -72,11 +81,14 @@ class UpstoxAPIClient:
         self.client_config = {
             "base_url": self.base_url,
             "timeout": httpx.Timeout(config.REQUEST_TIMEOUT),
-            "limits": httpx.Limits(max_keepalive_connections=5, max_connections=10, keepalive_expiry=30),
+            "limits": httpx.Limits(max_keepalive_connections=25, max_connections=50, keepalive_expiry=30),
             "http2": False,  # Disable HTTP/2 to avoid potential issues
         }
 
         self._client: httpx.AsyncClient | None = None
+        # Global concurrency gate: limits total in-flight HTTP requests
+        # to prevent 429 cascades when many instruments fetch chunks in parallel
+        self._inflight_sem = asyncio.Semaphore(10)
 
     async def __aenter__(self):
         """Async context manager entry"""
@@ -170,7 +182,10 @@ class UpstoxAPIClient:
             logger.info(f"Found {len(expiries)} expiry dates for {instrument_key}")
             return expiries
         else:
-            logger.error(f"Failed to fetch expiries: {response.status_code} - {response.text}")
+            error_msg = f"Failed to fetch expiries: {response.status_code} - {response.text}"
+            logger.error(error_msg)
+            if response.status_code in (401, 403):
+                raise PermissionError(error_msg)
             return []
 
     async def get_option_contracts(self, instrument_key: str, expiry_date: str) -> list[dict]:
@@ -334,31 +349,37 @@ class UpstoxAPIClient:
     async def _make_request_v3(
         self, method: str, endpoint: str, params: dict | None = None, priority: int = 5
     ) -> httpx.Response:
-        """Make rate-limited request to V3 API"""
+        """Make rate-limited request to V3 API.
+
+        Uses a global inflight semaphore (max 10 concurrent HTTP requests) on
+        top of the priority rate limiter to prevent 429 cascades when many
+        instruments are fetching chunks in parallel.
+        """
         if not self._client:
             await self.connect()
 
         if not self.auth_manager.is_token_valid():
             raise ValueError("Invalid or expired token. Please authenticate first.")
 
-        headers = self.auth_manager.get_headers()
-        await self.rate_limiter.acquire_with_priority(priority)
+        async with self._inflight_sem:
+            headers = self.auth_manager.get_headers()
+            await self.rate_limiter.acquire_with_priority(priority)
 
-        try:
-            # V3 uses a different base URL
-            url = f"{self.base_url_v3}{endpoint}"
-            response = await self._client.request(method=method, url=url, params=params, headers=headers)
+            try:
+                # V3 uses a different base URL
+                url = f"{self.base_url_v3}{endpoint}"
+                response = await self._client.request(method=method, url=url, params=params, headers=headers)
 
-            await self.rate_limiter.handle_response(response.status_code, dict(response.headers))
+                await self.rate_limiter.handle_response(response.status_code, dict(response.headers))
 
-            return response
+                return response
 
-        except httpx.TimeoutException as e:
-            logger.error(f"V3 request timeout: {e}")
-            raise
-        except Exception as e:
-            logger.error(f"V3 request failed: {e}")
-            raise
+            except httpx.TimeoutException as e:
+                logger.error(f"V3 request timeout: {e}")
+                raise
+            except Exception as e:
+                logger.error(f"V3 request failed: {e}")
+                raise
 
     async def get_historical_candles_v3(
         self,
@@ -367,6 +388,7 @@ class UpstoxAPIClient:
         interval: int = 1,
         from_date: str | None = None,
         to_date: str | None = None,
+        on_chunk_done: "Callable[[int, int, int], None] | None" = None,
     ) -> list[list]:
         """
         Get historical candle data via V3 API with auto date-chunking.
@@ -377,6 +399,8 @@ class UpstoxAPIClient:
             interval: Interval value (1-300 for minutes, 1-5 for hours, 1 for days/weeks/months)
             from_date: Start date YYYY-MM-DD (optional)
             to_date: End date YYYY-MM-DD (defaults to today)
+            on_chunk_done: Optional callback(chunks_done, chunks_total, candles_in_chunk)
+                           called after each chunk completes for real-time progress.
 
         Returns:
             List of candles [timestamp, open, high, low, close, volume, oi]
@@ -384,33 +408,64 @@ class UpstoxAPIClient:
         if to_date is None:
             to_date = date.today().isoformat()
         if from_date is None:
-            # Default: 1 year for daily, 1 month for minutes
-            days_back = 365 if unit in ("days", "weeks", "months") else 30
-            from_date = (date.today() - timedelta(days=days_back)).isoformat()
+            # Default to earliest date the API has data for this unit
+            from_date = DATA_AVAILABLE_FROM.get(unit, "2000-01-01")
+
+        # Silently cap to API data availability (user may request 1990 for daily, etc.)
+        available_from = DATA_AVAILABLE_FROM.get(unit, "2000-01-01")
+        if from_date < available_from:
+            logger.info(f"Capping from_date {from_date} → {available_from} (API data starts {available_from} for {unit})")
+            from_date = available_from
 
         max_days = _get_max_days(unit, interval)
         chunks = _chunk_date_range(from_date, to_date, max_days)
+        total_chunks = len(chunks)
+        chunks_completed = 0
 
+        # Fetch chunks with bounded concurrency per instrument (3 in-flight at a time).
+        # Combined with the global _inflight_sem (10), this keeps total API pressure low.
+        chunk_sem = asyncio.Semaphore(3)
+
+        async def _fetch_chunk(idx: int, chunk_from: str, chunk_to: str) -> tuple[int, list]:
+            nonlocal chunks_completed
+            async with chunk_sem:
+                endpoint = f"/historical-candle/{instrument_key}/{unit}/{interval}/{chunk_to}/{chunk_from}"
+                logger.info(f"V3 candles: {instrument_key} {unit}/{interval} {chunk_from} to {chunk_to}")
+                try:
+                    response = await self._make_request_v3("GET", endpoint, priority=5)
+                    if response.status_code == 200:
+                        data = response.json()
+                        candles = data.get("data", {}).get("candles", [])
+                        logger.info(f"Received {len(candles)} candles for chunk {chunk_from}-{chunk_to}")
+                        chunks_completed += 1
+                        if on_chunk_done:
+                            on_chunk_done(chunks_completed, total_chunks, len(candles))
+                        return (idx, candles)
+                    else:
+                        logger.error(
+                            f"V3 candle fetch failed for {instrument_key}: {response.status_code} - {response.text[:200]}"
+                        )
+                        chunks_completed += 1
+                        if on_chunk_done:
+                            on_chunk_done(chunks_completed, total_chunks, 0)
+                        return (idx, [])
+                except Exception as e:
+                    logger.error(f"V3 candle fetch error for {instrument_key} ({chunk_from}-{chunk_to}): {e}")
+                    chunks_completed += 1
+                    if on_chunk_done:
+                        on_chunk_done(chunks_completed, total_chunks, 0)
+                    return (idx, [])
+
+        results = await asyncio.gather(
+            *[_fetch_chunk(i, cf, ct) for i, (cf, ct) in enumerate(chunks)],
+            return_exceptions=True,
+        )
+
+        # Reassemble in chronological order
         all_candles = []
-        for chunk_from, chunk_to in chunks:
-            endpoint = f"/historical-candle/{instrument_key}/{unit}/{interval}/{chunk_to}/{chunk_from}"
-
-            logger.info(f"V3 candles: {instrument_key} {unit}/{interval} {chunk_from} to {chunk_to}")
-
-            try:
-                response = await self._make_request_v3("GET", endpoint, priority=5)
-
-                if response.status_code == 200:
-                    data = response.json()
-                    candles = data.get("data", {}).get("candles", [])
-                    all_candles.extend(candles)
-                    logger.info(f"Received {len(candles)} candles for chunk {chunk_from}-{chunk_to}")
-                else:
-                    logger.error(
-                        f"V3 candle fetch failed for {instrument_key}: {response.status_code} - {response.text[:200]}"
-                    )
-            except Exception as e:
-                logger.error(f"V3 candle fetch error for {instrument_key} ({chunk_from}-{chunk_to}): {e}")
+        for result in sorted(results, key=lambda r: r[0] if isinstance(r, tuple) else 0):
+            if isinstance(result, tuple):
+                all_candles.extend(result[1])
 
         logger.info(f"Total V3 candles for {instrument_key}: {len(all_candles)}")
         return all_candles

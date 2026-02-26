@@ -142,24 +142,28 @@
                 <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
                     <div>
                         <label class="label label-text text-xs">Interval</label>
-                        <select id="collect-interval" class="select select-bordered select-sm w-full">
+                        <select id="collect-interval" class="select select-bordered select-sm w-full" onchange="onIntervalChange()">
                             <option value="1day">1 Day</option>
+                            <option value="1week">1 Week</option>
+                            <option value="1month">1 Month</option>
                             <option value="1hour">1 Hour</option>
                             <option value="30minute">30 Min</option>
                             <option value="15minute">15 Min</option>
+                            <option value="10minute">10 Min</option>
                             <option value="5minute">5 Min</option>
+                            <option value="3minute">3 Min</option>
                             <option value="1minute">1 Min</option>
-                            <option value="1week">1 Week</option>
-                            <option value="1month">1 Month</option>
                         </select>
                     </div>
                     <div>
                         <label class="label label-text text-xs">From Date</label>
-                        <input type="date" id="collect-from" class="input input-bordered input-sm w-full">
+                        <input type="date" id="collect-from" class="input input-bordered input-sm w-full"
+                               value="2000-01-01" oninput="this.dataset.userEdited='1'; updateEstimate()">
                     </div>
                     <div>
                         <label class="label label-text text-xs">To Date</label>
-                        <input type="date" id="collect-to" class="input input-bordered input-sm w-full">
+                        <input type="date" id="collect-to" class="input input-bordered input-sm w-full"
+                               oninput="updateEstimate()">
                     </div>
                     <div class="flex items-end">
                         <button id="btn-start-collection" onclick="startCandleCollection()" class="btn btn-supabase btn-sm w-full">
@@ -167,6 +171,8 @@
                         </button>
                     </div>
                 </div>
+                <!-- Estimate row -->
+                <div id="estimate-info" class="text-xs text-gray-500 mb-2 hidden"></div>
                 <div class="flex items-center justify-between mt-1">
                     <div class="text-xs text-gray-500 flex items-center gap-2">
                         Selected: <span id="selected-count" class="font-semibold">0</span> instruments
@@ -174,6 +180,12 @@
                         <button onclick="clearSelection()" class="btn btn-xs btn-outline btn-ghost">Clear</button>
                         <span id="incremental-info" class="ml-2 hidden"></span>
                     </div>
+                    <label class="flex items-center gap-2 text-xs cursor-pointer">
+                        <span class="text-gray-500">Batch size:</span>
+                        <input type="range" id="collect-workers" min="1" max="50" value="20"
+                               class="range range-xs range-success w-24" oninput="document.getElementById('workers-val').textContent=this.value">
+                        <span id="workers-val" class="font-semibold w-4 text-center">20</span>
+                    </label>
                     <label class="flex items-center gap-2 cursor-pointer">
                         <input type="checkbox" id="collect-incremental" class="checkbox checkbox-sm checkbox-success" checked>
                         <span class="text-xs">Incremental (resume from last collection)</span>
@@ -252,6 +264,12 @@
     </div>
 </div>
 
+<style>
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+}
+</style>
 <script>
 let currentSegment = null;
 let currentOffset = 0;
@@ -264,7 +282,6 @@ let candlePollInterval = null;
 
 // XSS escaping helpers
 function escHtml(s) { if (!s) return ''; var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
-function escAttr(s) { if (!s) return ''; return String(s).replace(/&/g,'&amp;').replace(/'/g,'&#39;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
@@ -272,11 +289,10 @@ document.addEventListener('DOMContentLoaded', () => {
     loadWatchlists();
     loadAnalytics();
     checkActiveCandleTasks();
-    // Set default dates
+    // Set default dates based on the currently selected interval
     const today = new Date().toISOString().split('T')[0];
-    const yearAgo = new Date(Date.now() - 365*24*60*60*1000).toISOString().split('T')[0];
-    document.getElementById('collect-from').value = yearAgo;
     document.getElementById('collect-to').value = today;
+    onIntervalChange();  // sets from-date to interval-appropriate start + runs estimate
 });
 
 async function loadSegments() {
@@ -494,8 +510,11 @@ function updateSelectedUI() {
     document.getElementById('collect-panel').classList.toggle('hidden', selectedKeys.size === 0);
     if (selectedKeys.size > 0) {
         fetchIncrementalInfo();
+        updateEstimate();
     } else {
         document.getElementById('incremental-info').classList.add('hidden');
+        const el = document.getElementById('estimate-info');
+        if (el) el.classList.add('hidden');
     }
 }
 
@@ -645,6 +664,62 @@ async function deleteWatchlist(wlId) {
     loadWatchlists();
 }
 
+// ── Interval helpers & live estimate ─────────────────────
+
+// Earliest date the API has data for each interval
+const INTERVAL_FROM_DATES = {
+    '1day': '2000-01-01', '1week': '2000-01-01', '1month': '2000-01-01',
+    '1hour': '2022-01-01', '30minute': '2022-01-01',
+    '15minute': '2022-01-01', '10minute': '2022-01-01',
+    '5minute': '2022-01-01', '3minute': '2022-01-01', '1minute': '2022-01-01',
+};
+
+// Max chunk size (days) per interval — mirrors server _V3_MAX_RANGE
+const INTERVAL_CHUNK_DAYS = {
+    '1day': 3650, '1week': 999999, '1month': 999999,
+    '1hour': 90, '30minute': 90,
+    '15minute': 30, '10minute': 30, '5minute': 30, '3minute': 30, '1minute': 30,
+};
+
+function onIntervalChange() {
+    const interval = document.getElementById('collect-interval').value;
+    const fromInput = document.getElementById('collect-from');
+    // Auto-set from date only if user hasn't manually edited it
+    if (!fromInput.dataset.userEdited) {
+        fromInput.value = INTERVAL_FROM_DATES[interval] || '2000-01-01';
+    }
+    updateEstimate();
+}
+
+function updateEstimate() {
+    const interval = document.getElementById('collect-interval').value;
+    const fromVal = document.getElementById('collect-from').value ||
+                    INTERVAL_FROM_DATES[interval] || '2000-01-01';
+    const toVal   = document.getElementById('collect-to').value ||
+                    new Date().toISOString().split('T')[0];
+    const stockCount = selectedKeys.size;
+    const el = document.getElementById('estimate-info');
+    if (!el) return;
+    if (stockCount === 0) { el.classList.add('hidden'); return; }
+
+    const days = Math.max(1, (new Date(toVal) - new Date(fromVal)) / 86400000);
+    const chunkDays = INTERVAL_CHUNK_DAYS[interval] || 3650;
+    const chunksPerStock = Math.ceil(days / chunkDays);
+    const totalCalls = stockCount * chunksPerStock;
+    const minNeeded = Math.ceil(totalCalls / 450); // 450 req/min conservative
+    const timeStr = minNeeded < 60
+        ? `~${minNeeded} min`
+        : `~${(minNeeded / 60).toFixed(1)} hr`;
+
+    el.innerHTML = `<span class="inline-flex items-center gap-2">
+        <svg class="w-3 h-3 text-yellow-500" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg>
+        <strong>${stockCount.toLocaleString()}</strong> stocks ×
+        <strong>${chunksPerStock}</strong> API chunk${chunksPerStock > 1 ? 's' : ''} =
+        <strong>${totalCalls.toLocaleString()}</strong> total API calls &mdash; estimated <strong>${timeStr}</strong>
+        </span>`;
+    el.classList.remove('hidden');
+}
+
 // ── Candle Collection with Rich Progress ─────────────────
 
 async function startCandleCollection() {
@@ -654,6 +729,7 @@ async function startCandleCollection() {
     const fromDate = document.getElementById('collect-from').value;
     const toDate = document.getElementById('collect-to').value;
     const incremental = document.getElementById('collect-incremental').checked;
+    const workers = parseInt(document.getElementById('collect-workers').value) || 3;
 
     const btn = document.getElementById('btn-start-collection');
     btn.disabled = true;
@@ -668,7 +744,7 @@ async function startCandleCollection() {
                 interval: interval,
                 from_date: fromDate || null,
                 to_date: toDate || null,
-                batch_size: 5,
+                workers: workers,
                 incremental: incremental
             })
         });
@@ -749,6 +825,7 @@ function startPolling(tid) {
         window._sseSource.addEventListener('task:completed', onSSE);
         window._sseSource.addEventListener('task:failed', onSSE);
     }
+    fetchCandleStatus();  // Immediate first poll
     candlePollInterval = setInterval(fetchCandleStatus, window._sseSource ? 5000 : 1000);
 }
 
@@ -756,10 +833,20 @@ function updateProgressUI(data) {
     const pct = data.progress || 0;
     document.getElementById('candle-progress-bar').style.width = pct + '%';
     document.getElementById('progress-pct').textContent = pct + '%';
-    document.getElementById('progress-label').textContent =
-        data.status === 'completed' ? 'Complete' :
-        data.status === 'failed' ? 'Failed' :
-        `Processing ${data.processed || 0} of ${data.total || 0}`;
+
+    // Build label — include batch info when available
+    let label;
+    if (data.status === 'completed') {
+        label = 'Complete';
+    } else if (data.status === 'failed') {
+        label = 'Failed';
+    } else {
+        const action = data.current_action || data.current_instrument || '';
+        const batchMatch = action.match(/^\[(\d+)\/(\d+)\]/);
+        const batchInfo = batchMatch ? ` — batch ${batchMatch[1]} of ${batchMatch[2]}` : '';
+        label = `Processing ${data.processed || 0} of ${data.total || 0}${batchInfo}`;
+    }
+    document.getElementById('progress-label').textContent = label;
 
     // Stat cards
     document.getElementById('stat-inst-done').textContent = data.processed || 0;
@@ -768,9 +855,10 @@ function updateProgressUI(data) {
     document.getElementById('stat-errors').textContent = data.errors || 0;
     document.getElementById('stat-skipped').textContent = data.skipped || 0;
 
-    // Current action
-    if (data.current_instrument && data.status === 'processing') {
-        document.getElementById('progress-current-action').textContent = 'Currently processing: ' + data.current_instrument;
+    // Current action — show at all times while running (not just when current_instrument truthy)
+    const actionText = data.current_action || data.current_instrument || data.status_message || '';
+    if (actionText && data.status !== 'completed' && data.status !== 'failed') {
+        document.getElementById('progress-current-action').textContent = actionText;
     }
 
     // Per-instrument bars
@@ -779,17 +867,41 @@ function updateProgressUI(data) {
 
 function renderInstrumentBars(instrumentProgress) {
     const container = document.getElementById('instrument-bars');
-    const keys = Object.keys(instrumentProgress);
-    if (keys.length === 0) return;
+    const allKeys = Object.keys(instrumentProgress);
+    if (allKeys.length === 0) return;
+
+    // Priority order: running first, then completed/failed/skipped, then pending last
+    // Cap at 50 rows to avoid DOM freeze on large batches (e.g. 2000+ instruments)
+    const ORDER = { running: 0, failed: 1, completed: 2, skipped: 3, pending: 4 };
+    const sorted = [...allKeys].sort((a, b) => {
+        const sa = ORDER[instrumentProgress[a]?.status] ?? 4;
+        const sb = ORDER[instrumentProgress[b]?.status] ?? 4;
+        return sa - sb;
+    });
+    const keys = sorted.slice(0, 50);
+    const hidden = allKeys.length - keys.length;
 
     container.innerHTML = keys.map(key => {
         const info = instrumentProgress[key];
         const shortKey = key.split('|').pop() || key;
-        let barColor, statusText, barWidth;
+        let barColor, statusText, barWidth, extraStyle = '';
 
-        if (info.status === 'completed') {
+        if (info.status === 'running') {
+            barColor = '#3ecf8e';
+            const cd = info.chunks_done || 0;
+            const ct = info.chunks_total || 0;
+            const c = info.candles || 0;
+            if (ct > 0) {
+                statusText = cd + '/' + ct + ' chunks, ' + c.toLocaleString();
+                barWidth = Math.max(5, Math.round(cd / ct * 100)) + '%';
+            } else {
+                statusText = 'Fetching...';
+                barWidth = '5%';
+            }
+            extraStyle = cd < ct ? 'animation: pulse 1.2s ease-in-out infinite;' : '';
+        } else if (info.status === 'completed') {
             barColor = '#22c55e';
-            statusText = info.candles + ' candles';
+            statusText = (info.candles || 0) + ' candles';
             barWidth = '100%';
         } else if (info.status === 'failed') {
             barColor = '#ef4444';
@@ -808,11 +920,11 @@ function renderInstrumentBars(instrumentProgress) {
         return `<div class="flex items-center gap-2 text-xs">
             <div class="w-32 truncate font-mono" title="${escAttr(key)}">${escHtml(shortKey)}</div>
             <div class="flex-1 rounded-full" style="background: #e5e7eb; height: 6px;">
-                <div class="rounded-full" style="width: ${barWidth}; height: 6px; background: ${barColor}; transition: width 0.3s ease;"></div>
+                <div class="rounded-full" style="width: ${barWidth}; height: 6px; background: ${barColor}; ${extraStyle} transition: width 0.3s ease;"></div>
             </div>
-            <div class="w-20 text-right" style="color: ${barColor};">${statusText}</div>
+            <div class="w-20 text-right" style="color: ${barColor};">${escHtml(statusText)}</div>
         </div>`;
-    }).join('');
+    }).join('') + (hidden > 0 ? `<div class="text-xs text-gray-400 mt-1">+ ${hidden} more instruments...</div>` : '');
 }
 
 function onCollectionComplete(data) {
@@ -839,11 +951,15 @@ async function checkActiveCandleTasks() {
         const res = await fetch('/api/candles/tasks');
         const data = await res.json();
         if (data.tasks && data.tasks.length > 0) {
-            const task = data.tasks[0];
-            activeCandleTaskId = task.task_id;
-            showProgressPanel();
-            updateProgressUI(task);
-            startPolling(task.task_id);
+            // Only resume a task that is still actually running or pending —
+            // never latch onto a completed/failed task from a previous session.
+            const live = data.tasks.find(t => t.status === 'processing' || t.status === 'pending');
+            if (live) {
+                activeCandleTaskId = live.task_id;
+                showProgressPanel();
+                updateProgressUI(live);
+                startPolling(live.task_id);
+            }
         }
     } catch (e) {
         console.error('Failed to check active tasks:', e);

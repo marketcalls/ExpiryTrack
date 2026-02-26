@@ -6,7 +6,7 @@ import os
 import secrets
 from datetime import datetime
 
-from flask import Flask, Response, jsonify, render_template, session
+from flask import Flask, Response, jsonify, redirect, render_template, session
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from flask_wtf.csrf import CSRFProtect
@@ -53,16 +53,24 @@ app.auth_manager = auth_manager
 app.db_manager = db_manager
 
 
+# Clear stale session (useful after DB reset) — POST only to prevent CSRF forced-logout
+@app.route("/clear-session", methods=["POST"])
+def clear_session():
+    session.clear()
+    return redirect("/")
+
+
 # Context processor to make is_authenticated available in all templates
 @app.context_processor
 def inject_auth_status():
-    return {"is_authenticated": auth_manager.is_token_valid()}
+    return {"is_authenticated": auth_manager.is_token_valid(), "port": config.PORT}
 
 
 # ── Register Blueprints ──
 from src.routes.admin import admin_bp  # noqa: E402
 from src.routes.analytics import analytics_bp  # noqa: E402
 from src.routes.auth import auth_bp  # noqa: E402
+from src.routes.backtest import backtest_bp  # noqa: E402
 from src.routes.candles import candles_bp  # noqa: E402
 from src.routes.collect import collect_bp  # noqa: E402
 from src.routes.export import export_bp  # noqa: E402
@@ -83,6 +91,7 @@ app.register_blueprint(admin_bp)
 app.register_blueprint(analytics_bp)
 app.register_blueprint(tasks_bp)
 app.register_blueprint(sse_bp)
+app.register_blueprint(backtest_bp)
 
 # REST API blueprints (exempt from CSRF — use API key auth, not session cookies)
 from src.api.v1 import api_v1  # noqa: E402
@@ -109,9 +118,17 @@ for _ep in ("export.api_export_start", "export.api_export_available_expiries"):
 # Backup — full DB copy
 if "admin.api_backup_create" in app.view_functions:
     limiter.limit("3 per minute")(app.view_functions["admin.api_backup_create"])
+# Backtest run — CPU-intensive
+if "backtest.api_run_backtest" in app.view_functions:
+    limiter.limit("5 per minute")(app.view_functions["backtest.api_run_backtest"])
 # Auth login — prevent brute force
 if "auth.login" in app.view_functions:
     limiter.limit("10 per minute")(app.view_functions["auth.login"])
+# Status polling endpoints — polled frequently by UI during active tasks
+for _ep in ("candles.api_candles_status", "candles.api_candles_tasks",
+            "tasks.api_tasks_get", "tasks.api_tasks_list"):
+    if _ep in app.view_functions:
+        limiter.limit("300 per minute")(app.view_functions[_ep])
 
 # ── Core Routes (kept in app.py) ──
 
@@ -121,14 +138,26 @@ def index() -> str:
     """Home page."""
     is_authenticated = auth_manager.is_token_valid()
     stats = None
+    freshness = None
     if is_authenticated:
         try:
             stats = db_manager.get_summary_stats()
         except Exception:
             stats = None
+        try:
+            from src.analytics.engine import AnalyticsEngine
+
+            engine = AnalyticsEngine(db_manager)
+            summary = engine.get_dashboard_summary()
+            freshness = {
+                "last_collection_at": summary.get("last_collection_at"),
+                "newest_data_date": summary.get("newest_data_date"),
+            }
+        except Exception:
+            freshness = None
     message = session.pop("message", None)
     error = session.pop("error", None)
-    return render_template("index.html", is_authenticated=is_authenticated, stats=stats, message=message, error=error)
+    return render_template("index.html", is_authenticated=is_authenticated, stats=stats, freshness=freshness, message=message, error=error)
 
 
 @app.route("/help")

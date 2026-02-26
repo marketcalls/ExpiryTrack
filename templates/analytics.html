@@ -2,6 +2,8 @@
 
 {% block title %}Analytics - ExpiryTrack{% endblock %}
 
+{% block breadcrumbs %}<li class="text-gray-700 font-medium">Analytics</li>{% endblock %}
+
 {% block content %}
 <div class="max-w-7xl mx-auto">
     <div class="flex items-center justify-between mb-8">
@@ -93,9 +95,22 @@
     <div class="card-minimal p-6 mb-6">
         <div class="flex items-center justify-between mb-4">
             <h3 class="text-lg font-semibold">Data Quality</h3>
-            <button onclick="runQualityCheck()" id="qc-btn" class="btn-supabase text-sm">Run Check</button>
+            <div class="flex items-center gap-2">
+                <button onclick="fixQualityIssues()" id="qc-fix-btn" class="btn btn-sm btn-outline btn-warning hidden">Fix Issues</button>
+                <button onclick="checkMarketHours()" class="btn btn-sm btn-outline btn-info">Market Hours</button>
+                <button onclick="runQualityCheck()" id="qc-btn" class="btn-supabase text-sm">Run Check</button>
+            </div>
         </div>
         <div id="qc-results" class="text-sm text-gray-500">Click "Run Check" to validate data integrity.</div>
+    </div>
+
+    <!-- Quality Report History -->
+    <div class="card-minimal p-6 mb-6">
+        <div class="flex items-center justify-between mb-4">
+            <h3 class="text-lg font-semibold">Quality Report History</h3>
+            <button onclick="loadQualityReports()" class="btn btn-sm btn-ghost">Refresh</button>
+        </div>
+        <div id="qc-history" class="text-sm text-gray-500">Loading reports...</div>
     </div>
 </div>
 {% endblock %}
@@ -224,6 +239,7 @@ async function loadStorage() {
 // ── Quality Check ──
 async function runQualityCheck() {
     const btn = document.getElementById('qc-btn');
+    const fixBtn = document.getElementById('qc-fix-btn');
     const div = document.getElementById('qc-results');
     btn.disabled = true;
     btn.textContent = 'Running...';
@@ -242,20 +258,114 @@ async function runQualityCheck() {
         <div class="${passColor} font-semibold mb-2">${r.passed ? 'PASSED' : 'FAILED'}</div>`;
 
         if (r.violations && r.violations.length > 0) {
+            fixBtn.classList.remove('hidden');
             html += '<div class="max-h-40 overflow-y-auto text-xs font-mono bg-gray-50 p-2 rounded border">';
             r.violations.slice(0, 30).forEach(v => {
                 const icon = v.severity === 'error' ? 'text-red-500' : 'text-yellow-500';
-                html += `<div class="${icon}">[${v.severity.toUpperCase()}] ${v.check}: ${v.message}</div>`;
+                html += `<div class="${icon}">[${escapeHtml(v.severity.toUpperCase())}] ${escapeHtml(v.check)}: ${escapeHtml(v.message)}</div>`;
             });
             if (r.violations.length > 30) html += `<div class="text-gray-400">...${r.violations.length - 30} more</div>`;
             html += '</div>';
+        } else {
+            fixBtn.classList.add('hidden');
         }
         div.innerHTML = html;
     } catch (e) {
-        div.innerHTML = `<span class="text-red-500">Error: ${e.message}</span>`;
+        div.innerHTML = `<span class="text-red-500">Error: ${escapeHtml(e.message)}</span>`;
     }
     btn.disabled = false;
     btn.textContent = 'Run Check';
+}
+
+// ── Fix Quality Issues ──
+async function fixQualityIssues() {
+    const btn = document.getElementById('qc-fix-btn');
+    if (!confirm('Auto-fix quality issues? This will:\n- Re-mark orphan contracts as unfetched\n- Remove duplicate timestamps\n\nThis action modifies the database.')) return;
+
+    btn.disabled = true;
+    btn.textContent = 'Fixing...';
+
+    try {
+        const res = await fetch('/api/quality/fix', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}' });
+        const r = await res.json();
+        if (r.success) {
+            showToast(`Fixed: ${r.orphans_reset} orphans reset, ${r.duplicates_removed} duplicates removed`, 'success');
+            runQualityCheck();  // Re-run check to show updated results
+        } else {
+            showToast('Fix failed: ' + (r.error || 'Unknown error'), 'error');
+        }
+    } catch (e) {
+        showToast('Error: ' + e.message, 'error');
+    }
+    btn.disabled = false;
+    btn.textContent = 'Fix Issues';
+}
+
+// ── Market Hours Check ──
+async function checkMarketHours() {
+    const div = document.getElementById('qc-results');
+    div.innerHTML = '<span class="text-gray-400">Checking market hours...</span>';
+
+    try {
+        const res = await fetch('/api/quality/market-hours');
+        const r = await res.json();
+
+        let html = `<div class="mb-3">
+            <span class="font-semibold">${r.outside_hours.toLocaleString()}</span> candles outside market hours (9:15-15:30 IST)
+        </div>`;
+
+        if (r.low_candle_days && r.low_candle_days.length > 0) {
+            html += `<div class="font-semibold text-yellow-600 mb-2">${r.low_candle_days.length} days with low candle counts:</div>`;
+            html += '<div class="max-h-40 overflow-y-auto text-xs font-mono bg-gray-50 p-2 rounded border">';
+            r.low_candle_days.forEach(d => {
+                html += `<div>${escapeHtml(d.date)} — ${escapeHtml(d.instrument)}: ${escapeHtml(String(d.candle_count))}/${escapeHtml(String(d.expected))} candles</div>`;
+            });
+            html += '</div>';
+        } else {
+            html += '<div class="text-green-600 font-semibold">All trading days have adequate candle counts.</div>';
+        }
+        div.innerHTML = html;
+    } catch (e) {
+        div.innerHTML = `<span class="text-red-500">Error: ${escapeHtml(e.message)}</span>`;
+    }
+}
+
+// ── Quality Report History ──
+async function loadQualityReports() {
+    const div = document.getElementById('qc-history');
+    try {
+        const res = await fetch('/api/quality/reports');
+        const reports = await res.json();
+
+        if (reports.length === 0) {
+            div.innerHTML = '<span class="text-gray-400">No quality reports yet. Run a check to generate one.</span>';
+            return;
+        }
+
+        let html = '<table class="table table-sm w-full"><thead><tr class="text-xs text-gray-500 uppercase">';
+        html += '<th>Date</th><th>Instrument</th><th class="text-right">Checks</th><th class="text-right">Passed</th><th class="text-right">Errors</th><th class="text-right">Warnings</th><th>Result</th>';
+        html += '</tr></thead><tbody>';
+
+        reports.forEach(r => {
+            const resultBadge = r.passed
+                ? '<span class="badge badge-sm badge-success">PASS</span>'
+                : '<span class="badge badge-sm badge-error">FAIL</span>';
+            html += `<tr>
+                <td class="text-xs">${r.run_date}</td>
+                <td class="text-xs">${r.instrument_key || 'All'}</td>
+                <td class="text-right">${r.checks_run}</td>
+                <td class="text-right text-green-600">${r.checks_passed}</td>
+                <td class="text-right text-red-600">${r.errors}</td>
+                <td class="text-right text-yellow-600">${r.warnings}</td>
+                <td>${resultBadge}</td>
+            </tr>`;
+        });
+
+        html += '</tbody></table>';
+        div.innerHTML = html;
+    } catch (e) {
+        div.innerHTML = `<span class="text-red-500">Error loading reports: ${escapeHtml(e.message)}</span>`;
+    }
 }
 
 // ── Refresh all ──
@@ -267,6 +377,7 @@ function refreshAll() {
     loadCoverage();
     loadVolume();
     loadStorage();
+    loadQualityReports();
 }
 
 // Init

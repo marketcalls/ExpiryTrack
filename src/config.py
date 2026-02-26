@@ -48,8 +48,8 @@ class Config:
 
     # Rate Limiting defaults (Conservative for safety)
     MAX_WORKERS: int = 10
-    MAX_REQUESTS_SEC: int = 45  # Safety margin below 50
-    MAX_REQUESTS_MIN: int = 450  # Safety margin below 500
+    MAX_REQUESTS_SEC: int = 25  # Conservative margin below 50
+    MAX_REQUESTS_MIN: int = 250  # Conservative margin below 500
     MAX_REQUESTS_30MIN: int = 1800  # Safety margin below 2000
     REQUEST_TIMEOUT: int = 30
 

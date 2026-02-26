@@ -23,7 +23,7 @@ class InstrumentMasterRepository(BaseRepository):
             try:
                 conn.execute("BEGIN TRANSACTION")
                 conn.execute("INSERT OR REPLACE INTO instrument_master SELECT * FROM df")
-                conn.commit()
+                # NOTE: do NOT call conn.commit() here — get_connection() commits on exit
                 count = len(df)
                 logger.info(f"Bulk inserted {count} instruments into instrument_master")
                 return count

@@ -343,6 +343,294 @@ class DataQualityChecker:
             )
 
     # ------------------------------------------------------------------
+    # Auto-fix
+    # ------------------------------------------------------------------
+
+    def fix_violations(self, instrument_key: str | None = None) -> dict:
+        """Auto-fix common quality violations. Returns counts of fixes applied."""
+        fixes = {"orphans_reset": 0, "duplicates_removed": 0}
+
+        with self.db_manager.get_connection() as conn:
+            try:
+                # Fix 1: Re-mark orphan contracts (marked fetched but no data)
+                where = ""
+                params: list = []
+                if instrument_key:
+                    where = "AND c.instrument_key = ?"
+                    params = [instrument_key]
+
+                orphan_count = conn.execute(
+                    f"""
+                    UPDATE contracts c
+                    SET data_fetched = FALSE
+                    WHERE c.data_fetched = TRUE
+                      AND c.expired_instrument_key NOT IN (
+                          SELECT DISTINCT expired_instrument_key FROM historical_data
+                      )
+                      AND c.expired_instrument_key NOT IN (
+                          SELECT DISTINCT instrument_key FROM candle_data
+                      )
+                    {where}
+                """,
+                    params,
+                ).fetchone()
+                fixes["orphans_reset"] = orphan_count[0] if orphan_count else 0
+
+                # Fix 2: Remove duplicate timestamps (keep latest inserted)
+                dup_where = ""
+                dup_params: list = []
+                if instrument_key:
+                    dup_where = "AND expired_instrument_key LIKE ? || '%'"
+                    dup_params = [instrument_key]
+
+                dup_result = conn.execute(
+                    f"""
+                    DELETE FROM historical_data
+                    WHERE rowid NOT IN (
+                        SELECT MAX(rowid)
+                        FROM historical_data
+                        WHERE 1=1 {dup_where}
+                        GROUP BY expired_instrument_key, timestamp
+                    )
+                    AND 1=1 {dup_where}
+                """,
+                    dup_params * 2,
+                ).fetchone()
+                fixes["duplicates_removed"] = dup_result[0] if dup_result else 0
+
+                conn.commit()
+            except Exception:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                raise
+
+        logger.info(f"Quality fix applied: {fixes}")
+        return fixes
+
+    # ------------------------------------------------------------------
+    # Market hours check
+    # ------------------------------------------------------------------
+
+    def check_market_hours(self, instrument_key: str | None = None) -> dict:
+        """Check for candles outside market hours and days with low candle counts."""
+        results = {"outside_hours": 0, "low_candle_days": []}
+
+        with self.db_manager.get_read_connection() as conn:
+            where, params = self._instrument_filter(instrument_key)
+
+            # Count candles outside 9:15-15:30 IST
+            outside = conn.execute(
+                f"""
+                SELECT COUNT(*) FROM historical_data
+                WHERE (EXTRACT(HOUR FROM timestamp) < 9
+                    OR (EXTRACT(HOUR FROM timestamp) = 9 AND EXTRACT(MINUTE FROM timestamp) < 15)
+                    OR EXTRACT(HOUR FROM timestamp) > 15
+                    OR (EXTRACT(HOUR FROM timestamp) = 15 AND EXTRACT(MINUTE FROM timestamp) > 30))
+                {where}
+            """,
+                params,
+            ).fetchone()
+            results["outside_hours"] = outside[0] if outside else 0
+
+            # Days with fewer than expected candles (< 50% of 375)
+            low_days = conn.execute(
+                f"""
+                SELECT
+                    expired_instrument_key,
+                    CAST(timestamp AS DATE) AS trading_date,
+                    COUNT(*) AS candle_count
+                FROM historical_data
+                WHERE 1=1 {where}
+                GROUP BY expired_instrument_key, CAST(timestamp AS DATE)
+                HAVING candle_count < {EXPECTED_CANDLES_PER_DAY // 2}
+                ORDER BY candle_count ASC
+                LIMIT 50
+            """,
+                params,
+            ).fetchall()
+
+            results["low_candle_days"] = [
+                {
+                    "instrument": row[0],
+                    "date": str(row[1]),
+                    "candle_count": row[2],
+                    "expected": EXPECTED_CANDLES_PER_DAY,
+                }
+                for row in low_days
+            ]
+
+        return results
+
+    # ------------------------------------------------------------------
+    # Completeness scoring
+    # ------------------------------------------------------------------
+
+    def get_completeness_score(self, instrument_key: str, expiry_date: str) -> dict:
+        """Calculate completeness score for a specific instrument+expiry."""
+        with self.db_manager.get_read_connection() as conn:
+            # Get contracts for this expiry
+            contracts = conn.execute(
+                """
+                SELECT expired_instrument_key, data_fetched, no_data
+                FROM contracts
+                WHERE instrument_key = ? AND expiry_date = ?
+            """,
+                [instrument_key, expiry_date],
+            ).fetchall()
+
+            if not contracts:
+                return {"total_contracts": 0, "completeness_pct": 0, "details": {}}
+
+            total = len(contracts)
+            fetched = sum(1 for c in contracts if c[1])
+            no_data = sum(1 for c in contracts if c[2])
+            pending = total - fetched - no_data
+
+            # For fetched contracts, check actual trading days
+            fetched_keys = [c[0] for c in contracts if c[1]]
+            trading_day_scores = []
+
+            if fetched_keys:
+                placeholders = ",".join(["?"] * len(fetched_keys))
+                days_data = conn.execute(
+                    f"""
+                    SELECT
+                        expired_instrument_key,
+                        COUNT(DISTINCT CAST(timestamp AS DATE)) AS actual_days
+                    FROM historical_data
+                    WHERE expired_instrument_key IN ({placeholders})
+                    GROUP BY expired_instrument_key
+                """,
+                    fetched_keys,
+                ).fetchall()
+
+                for row in days_data:
+                    trading_day_scores.append(row[1])
+
+            avg_days = sum(trading_day_scores) / len(trading_day_scores) if trading_day_scores else 0
+
+            completeness = round(((fetched + no_data) / total) * 100, 1) if total > 0 else 0
+
+            return {
+                "total_contracts": total,
+                "fetched": fetched,
+                "no_data": no_data,
+                "pending": pending,
+                "completeness_pct": completeness,
+                "avg_trading_days": round(avg_days, 1),
+            }
+
+    def get_completeness_bulk(self, instrument_key: str | None = None) -> list[dict]:
+        """Get completeness scores for all instrument+expiry combinations."""
+        with self.db_manager.get_read_connection() as conn:
+            where = ""
+            params: list = []
+            if instrument_key:
+                where = "WHERE instrument_key = ?"
+                params = [instrument_key]
+
+            rows = conn.execute(
+                f"""
+                SELECT
+                    instrument_key,
+                    expiry_date,
+                    COUNT(*) AS total,
+                    COUNT(*) FILTER (WHERE data_fetched = TRUE) AS fetched,
+                    COUNT(*) FILTER (WHERE no_data = TRUE) AS no_data_count
+                FROM contracts
+                {where}
+                GROUP BY instrument_key, expiry_date
+                ORDER BY instrument_key, expiry_date
+            """,
+                params,
+            ).fetchall()
+
+            results = []
+            for row in rows:
+                total = row[2]
+                fetched = row[3]
+                no_data_count = row[4]
+                pct = round(((fetched + no_data_count) / total) * 100, 1) if total > 0 else 0
+                results.append({
+                    "instrument_key": row[0],
+                    "expiry": str(row[1]),
+                    "total": total,
+                    "fetched": fetched,
+                    "no_data": no_data_count,
+                    "completeness_pct": pct,
+                })
+            return results
+
+    # ------------------------------------------------------------------
+    # Persist report
+    # ------------------------------------------------------------------
+
+    def save_report(self, report: QualityReport, instrument_key: str | None = None) -> None:
+        """Save a quality report to the database."""
+        import json
+
+        with self.db_manager.get_connection() as conn:
+            try:
+                violations_json = json.dumps([v.to_dict() for v in report.violations])
+                conn.execute(
+                    """
+                    INSERT INTO quality_reports
+                        (instrument_key, checks_run, checks_passed, errors, warnings, passed, violations)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                    [
+                        instrument_key,
+                        report.checks_run,
+                        report.checks_passed,
+                        report.error_count,
+                        report.warning_count,
+                        report.passed,
+                        violations_json,
+                    ],
+                )
+                conn.commit()
+            except Exception:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                raise
+
+    def get_recent_reports(self, limit: int = 10) -> list[dict]:
+        """Fetch recent quality reports."""
+        import json
+
+        with self.db_manager.get_read_connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, run_date, instrument_key, checks_run, checks_passed,
+                       errors, warnings, passed, violations, created_at
+                FROM quality_reports
+                ORDER BY created_at DESC
+                LIMIT ?
+            """,
+                [limit],
+            ).fetchall()
+
+            return [
+                {
+                    "id": row[0],
+                    "run_date": str(row[1]),
+                    "instrument_key": row[2],
+                    "checks_run": row[3],
+                    "checks_passed": row[4],
+                    "errors": row[5],
+                    "warnings": row[6],
+                    "passed": row[7],
+                    "violations": json.loads(row[8]) if row[8] else [],
+                    "created_at": str(row[9]),
+                }
+                for row in rows
+            ]
+
+    # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
 

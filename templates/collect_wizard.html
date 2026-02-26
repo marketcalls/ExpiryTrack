@@ -2,6 +2,8 @@
 
 {% block title %}Data Collection Wizard - ExpiryTrack{% endblock %}
 
+{% block breadcrumbs %}<li class="text-gray-700 font-medium">Collect Data</li>{% endblock %}
+
 {% block content %}
 <div class="max-w-4xl mx-auto">
     <!-- Header -->
@@ -106,6 +108,59 @@
                     </div>
                 </div>
 
+                <!-- Strike Range Filter (visible when options or both selected) -->
+                <div id="strike-filter-section" class="mt-6 border-t border-gray-200 pt-6">
+                    <h3 class="text-lg font-medium text-gray-900 mb-4">Strike Range Filter</h3>
+                    <p class="text-sm text-gray-600 mb-4">Optionally limit which option strikes are collected:</p>
+
+                    <div class="space-y-3">
+                        <label class="flex items-center p-3 border border-gray-200 rounded-lg hover:border-green-300 cursor-pointer">
+                            <input type="radio" name="strike_filter_type" value="all" class="mr-3" checked onchange="updateStrikeFilterUI()">
+                            <div>
+                                <div class="font-medium text-gray-900 text-sm">All Strikes</div>
+                                <div class="text-xs text-gray-500">Download data for every available strike price (default)</div>
+                            </div>
+                        </label>
+
+                        <label class="flex items-center p-3 border border-gray-200 rounded-lg hover:border-green-300 cursor-pointer">
+                            <input type="radio" name="strike_filter_type" value="atm_range" class="mr-3" onchange="updateStrikeFilterUI()">
+                            <div class="flex-1">
+                                <div class="font-medium text-gray-900 text-sm">ATM +/- N Strikes</div>
+                                <div class="text-xs text-gray-500">Strikes around the at-the-money price</div>
+                            </div>
+                        </label>
+
+                        <div id="atm-range-input" class="hidden ml-8 mt-2 mb-2">
+                            <label class="text-sm text-gray-700">Number of strikes around ATM:</label>
+                            <input type="number" id="atm-range-value" min="1" max="50" value="10"
+                                   class="ml-2 w-20 px-2 py-1 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-green-500">
+                        </div>
+
+                        <label class="flex items-center p-3 border border-gray-200 rounded-lg hover:border-green-300 cursor-pointer">
+                            <input type="radio" name="strike_filter_type" value="custom" class="mr-3" onchange="updateStrikeFilterUI()">
+                            <div>
+                                <div class="font-medium text-gray-900 text-sm">Custom Range</div>
+                                <div class="text-xs text-gray-500">Specify min and max strike prices</div>
+                            </div>
+                        </label>
+
+                        <div id="custom-range-input" class="hidden ml-8 mt-2 mb-2 flex items-center gap-3">
+                            <div>
+                                <label class="text-sm text-gray-700">Min Strike:</label>
+                                <input type="number" id="custom-min-strike" min="0" step="0.5"
+                                       class="ml-1 w-28 px-2 py-1 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-green-500"
+                                       placeholder="e.g. 20000">
+                            </div>
+                            <div>
+                                <label class="text-sm text-gray-700">Max Strike:</label>
+                                <input type="number" id="custom-max-strike" min="0" step="0.5"
+                                       class="ml-1 w-28 px-2 py-1 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-green-500"
+                                       placeholder="e.g. 25000">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="flex justify-between items-center mt-8">
                     <button type="button" class="btn bg-gray-100 text-gray-700 hover:bg-gray-200 font-medium py-2 px-4 rounded-lg" onclick="prevStep(2)">
                         Previous
@@ -153,6 +208,24 @@
                     <div id="collection-summary" class="text-sm text-blue-700">
                         <!-- Summary will be populated -->
                     </div>
+                    <!-- Estimation -->
+                    <div id="collection-estimation" class="mt-3 pt-3 border-t border-blue-200 hidden">
+                        <h4 class="font-semibold text-blue-800 mb-2">Estimated Work</h4>
+                        <div class="grid grid-cols-3 gap-3 text-center">
+                            <div>
+                                <div id="est-api-calls" class="text-lg font-bold text-blue-800">-</div>
+                                <div class="text-xs text-blue-600">API Calls</div>
+                            </div>
+                            <div>
+                                <div id="est-time" class="text-lg font-bold text-blue-800">-</div>
+                                <div class="text-xs text-blue-600">Est. Time</div>
+                            </div>
+                            <div>
+                                <div id="est-storage" class="text-lg font-bold text-blue-800">-</div>
+                                <div class="text-xs text-blue-600">Est. Storage</div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- Configuration -->
@@ -170,12 +243,21 @@
 
                     <div>
                         <label class="block text-sm font-medium text-gray-700 mb-2">Concurrent Workers</label>
-                        <input type="range" id="workers" min="1" max="10" value="5"
+                        <input type="range" id="workers" min="1" max="50" value="10"
                                class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer">
                         <div class="flex justify-between text-xs text-gray-500 mt-1">
-                            <span>1 (Slow)</span>
-                            <span id="workers-value">5 (Balanced)</span>
-                            <span>10 (Fast)</span>
+                            <span>1 (Safe)</span>
+                            <span id="workers-value">10 (Recommended)</span>
+                            <span>50 (Fast)</span>
+                        </div>
+                        <p class="text-xs text-gray-400 mt-1">Instruments fetched concurrently. Rate limiter auto-throttles to stay within Upstox limits (45 req/sec).</p>
+                    </div>
+
+                    <div class="flex items-start gap-3 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                        <input type="checkbox" id="force-refetch" class="mt-1 checkbox checkbox-sm checkbox-warning">
+                        <div>
+                            <label for="force-refetch" class="text-sm font-medium text-amber-800 cursor-pointer">Force Re-download</label>
+                            <p class="text-xs text-amber-600 mt-0.5">Re-download candle data even for contracts that were previously fetched. Use this if data was lost or corrupted.</p>
                         </div>
                     </div>
                 </div>
@@ -284,7 +366,6 @@
 <script>
 // XSS escaping helpers
 function escHtml(s) { if (!s) return ''; var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
-function escAttr(s) { if (!s) return ''; return String(s).replace(/&/g,'&amp;').replace(/'/g,'&#39;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
 // Wizard State
 let currentStep = 1;
@@ -293,6 +374,47 @@ let selectedContractType = 'both';
 let selectedExpiries = {};
 let taskId = null;
 let progressInterval = null;
+
+// Strike filter UI toggle
+function updateStrikeFilterUI() {
+    const filterType = document.querySelector('input[name="strike_filter_type"]:checked').value;
+    document.getElementById('atm-range-input').classList.toggle('hidden', filterType !== 'atm_range');
+    document.getElementById('custom-range-input').classList.toggle('hidden', filterType !== 'custom');
+
+    // Show/hide entire strike filter section based on contract type
+    const contractType = document.querySelector('input[name="contract_type"]:checked').value;
+    const section = document.getElementById('strike-filter-section');
+    if (contractType === 'futures') {
+        section.classList.add('hidden');
+    } else {
+        section.classList.remove('hidden');
+    }
+}
+
+// Listen for contract type changes to show/hide strike filter
+document.addEventListener('change', function(e) {
+    if (e.target.name === 'contract_type') {
+        updateStrikeFilterUI();
+    }
+});
+
+function getStrikeFilter() {
+    const filterType = document.querySelector('input[name="strike_filter_type"]:checked').value;
+    if (filterType === 'all') return null;
+    if (filterType === 'atm_range') {
+        const range = parseInt(document.getElementById('atm-range-value').value) || 10;
+        return { type: 'atm_range', atm_range: range };
+    }
+    if (filterType === 'custom') {
+        const minStr = document.getElementById('custom-min-strike').value;
+        const maxStr = document.getElementById('custom-max-strike').value;
+        const filter = { type: 'custom' };
+        if (minStr) filter.min_strike = parseFloat(minStr);
+        if (maxStr) filter.max_strike = parseFloat(maxStr);
+        return filter;
+    }
+    return null;
+}
 
 // Initialize
 document.addEventListener('DOMContentLoaded', function() {
@@ -509,16 +631,34 @@ async function loadExpiries() {
     container.innerHTML = '<div class="text-center text-gray-500">Loading expiries...</div>';
 
     try {
+        const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
         const response = await fetch('/api/instruments/expiries', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
             body: JSON.stringify({ instruments: selectedInstruments })
         });
 
         const data = await response.json();
+
+        // Show errors from API (e.g. invalid token)
+        if (data.errors && data.errors.length > 0) {
+            const errorHtml = data.errors.map(e =>
+                '<div class="flex items-center gap-2 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm mb-3">' +
+                '<svg class="w-5 h-5 shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.28 7.22a.75.75 0 00-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 101.06 1.06L10 11.06l1.72 1.72a.75.75 0 101.06-1.06L11.06 10l1.72-1.72a.75.75 0 00-1.06-1.06L10 8.94 8.28 7.22z" clip-rule="evenodd"/></svg>' +
+                '<span>' + escHtml(e) + '</span></div>'
+            ).join('');
+            container.innerHTML = errorHtml;
+            // Still display any instruments that did return data
+            const hasData = Object.values(data.expiries || {}).some(d => d.length > 0);
+            if (hasData) {
+                displayExpiries(data.expiries);
+            }
+            return;
+        }
+
         displayExpiries(data.expiries);
     } catch (error) {
-        container.innerHTML = '<div class="text-center text-red-500">Error loading expiries</div>';
+        container.innerHTML = '<div class="text-center text-red-500">Error loading expiries: ' + escHtml(error.message) + '</div>';
     }
 }
 
@@ -586,16 +726,55 @@ function updateExpirySelection() {
 function showSummary() {
     selectedContractType = document.querySelector('input[name="contract_type"]:checked').value;
 
+    const strikeFilterSummary = getStrikeFilter();
+    let strikeDesc = 'All Strikes';
+    if (strikeFilterSummary) {
+        if (strikeFilterSummary.type === 'atm_range') {
+            strikeDesc = `ATM +/- ${strikeFilterSummary.atm_range} strikes`;
+        } else if (strikeFilterSummary.type === 'custom') {
+            const parts = [];
+            if (strikeFilterSummary.min_strike != null) parts.push(`Min: ${strikeFilterSummary.min_strike}`);
+            if (strikeFilterSummary.max_strike != null) parts.push(`Max: ${strikeFilterSummary.max_strike}`);
+            strikeDesc = `Custom Range (${parts.join(', ')})`;
+        }
+    }
+
     let summary = `
         <p><strong>Instruments:</strong> ${selectedInstruments.map(i => {
             const m = allWizardInstruments.find(inst => inst.instrument_key === i);
             return m ? m.symbol : (i.split('|')[1] || i);
         }).join(', ')}</p>
         <p><strong>Contract Type:</strong> ${selectedContractType}</p>
+        <p><strong>Strike Filter:</strong> ${strikeDesc}</p>
         <p><strong>Expiries:</strong> ${Object.values(selectedExpiries).flat().length} selected</p>
     `;
 
     document.getElementById('collection-summary').innerHTML = summary;
+
+    // Fetch estimation
+    fetchEstimation();
+}
+
+async function fetchEstimation() {
+    const estDiv = document.getElementById('collection-estimation');
+    try {
+        const res = await fetch('/api/collect/estimate', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                instruments: selectedInstruments,
+                expiries: selectedExpiries,
+                contract_type: selectedContractType
+            })
+        });
+        const est = await res.json();
+        document.getElementById('est-api-calls').textContent = (est.api_calls || 0).toLocaleString();
+        document.getElementById('est-time').textContent = est.est_time_display || '-';
+        document.getElementById('est-storage').textContent = est.est_storage_display || '-';
+        estDiv.classList.remove('hidden');
+    } catch (e) {
+        estDiv.classList.add('hidden');
+    }
 }
 
 // Worker Slider
@@ -607,9 +786,11 @@ function setupWorkerSlider() {
         const value = parseInt(this.value);
         let description;
 
-        if (value <= 3) description = `${value} (Conservative)`;
-        else if (value <= 7) description = `${value} (Balanced)`;
-        else description = `${value} (Aggressive)`;
+        if (value === 1) description = `${value} (Safe)`;
+        else if (value <= 10) description = `${value} (Recommended)`;
+        else if (value <= 25) description = `${value} (Fast)`;
+        else if (value <= 40) description = `${value} (Aggressive)`;
+        else description = `${value} (Max throughput)`;
 
         valueSpan.textContent = description;
     });
@@ -630,18 +811,23 @@ async function startCollection() {
     const interval = document.getElementById('interval').value;
     const workers = parseInt(document.getElementById('workers').value);
 
+    const strikeFilter = getStrikeFilter();
+    const forceRefetch = document.getElementById('force-refetch')?.checked || false;
     const config = {
         instruments: selectedInstruments,
         contract_type: selectedContractType,
         expiries: selectedExpiries,
         interval: interval,
-        workers: workers
+        workers: workers,
+        strike_filter: strikeFilter,
+        force_refetch: forceRefetch
     };
 
     try {
+        const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
         const response = await fetch('/api/collect/start', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
             body: JSON.stringify(config)
         });
 
@@ -788,7 +974,7 @@ function startNewCollection() {
     document.getElementById('interval').value = '1minute';
 
     // Reset workers to default
-    document.getElementById('workers').value = '5';
+    document.getElementById('workers').value = '10';
 
     // Reset UI
     document.getElementById('step-2-content').innerHTML = '';

@@ -47,7 +47,7 @@ class HistoricalDataRepository(BaseRepository):
                     """,
                         (expired_instrument_key,),
                     )
-                    conn.commit()
+                    # NOTE: do NOT call conn.commit() here — get_connection() commits on exit
                     count = len(data_to_insert)
                     logger.info(f"Successfully inserted {count} candles for {expired_instrument_key}")
                     return count
@@ -72,7 +72,7 @@ class HistoricalDataRepository(BaseRepository):
             """,
                 (expired_instrument_key,),
             )
-            conn.commit()
+            # NOTE: do NOT call conn.commit() here — get_connection() commits on exit
             logger.info(f"Marked contract {expired_instrument_key} as no_data")
 
     def get_historical_data(self, expired_instrument_key: str) -> list[list]:
@@ -86,6 +86,116 @@ class HistoricalDataRepository(BaseRepository):
                 (expired_instrument_key,),
             )
             return [list(row) for row in cursor.fetchall()]
+
+    def delete_by_instrument(self, instrument_key: str) -> int:
+        """Delete all historical data for an instrument. Returns row count."""
+        # Escape LIKE wildcards to prevent unintended broad matches
+        safe_key = instrument_key.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        with self.get_connection() as conn:
+            conn.execute("BEGIN TRANSACTION")
+            try:
+                result = conn.execute(
+                    "DELETE FROM historical_data WHERE expired_instrument_key LIKE ? || '%' ESCAPE '\\'",
+                    (safe_key,),
+                ).fetchone()
+                count = result[0] if result else 0
+                # Also delete from candle_data
+                result2 = conn.execute(
+                    "DELETE FROM candle_data WHERE instrument_key = ?",
+                    (instrument_key,),
+                ).fetchone()
+                count += result2[0] if result2 else 0
+                # NOTE: do NOT call conn.commit() here — get_connection() commits on exit
+                logger.info(f"Deleted {count} rows for instrument {instrument_key}")
+                return count
+            except duckdb.Error:
+                conn.rollback()
+                raise
+
+    def delete_by_expiry(self, instrument_key: str, expiry_date: str) -> int:
+        """Delete historical data for a specific instrument+expiry. Returns row count."""
+        with self.get_connection() as conn:
+            conn.execute("BEGIN TRANSACTION")
+            try:
+                # Get expired_instrument_keys for this expiry
+                keys = conn.execute(
+                    "SELECT expired_instrument_key FROM contracts WHERE instrument_key = ? AND expiry = ?",
+                    (instrument_key, expiry_date),
+                ).fetchall()
+                if not keys:
+                    # NOTE: get_connection() will commit the empty BEGIN TRANSACTION on exit
+                    return 0
+                key_list = [k[0] for k in keys]
+                placeholders = ",".join(["?"] * len(key_list))
+                result = conn.execute(
+                    f"DELETE FROM historical_data WHERE expired_instrument_key IN ({placeholders})",
+                    key_list,
+                ).fetchone()
+                count = result[0] if result else 0
+                # Reset contracts as unfetched
+                conn.execute(
+                    f"UPDATE contracts SET data_fetched = FALSE, no_data = FALSE WHERE expired_instrument_key IN ({placeholders})",
+                    key_list,
+                )
+                # NOTE: do NOT call conn.commit() here — get_connection() commits on exit
+                logger.info(f"Deleted {count} rows for {instrument_key} expiry {expiry_date}")
+                return count
+            except duckdb.Error:
+                conn.rollback()
+                raise
+
+    def delete_by_date_range(self, from_date: str, to_date: str, instrument_key: str | None = None) -> int:
+        """Delete historical data within a date range. Returns row count."""
+        with self.get_connection() as conn:
+            conn.execute("BEGIN TRANSACTION")
+            try:
+                where = "WHERE CAST(timestamp AS DATE) BETWEEN ? AND ?"
+                params: list = [from_date, to_date]
+                if instrument_key:
+                    safe_key = instrument_key.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+                    where += " AND expired_instrument_key LIKE ? || '%' ESCAPE '\\'"
+                    params.append(safe_key)
+                result = conn.execute(
+                    f"DELETE FROM historical_data {where}", params
+                ).fetchone()
+                count = result[0] if result else 0
+                # NOTE: do NOT call conn.commit() here — get_connection() commits on exit
+                logger.info(f"Deleted {count} rows for date range {from_date} to {to_date}")
+                return count
+            except duckdb.Error:
+                conn.rollback()
+                raise
+
+    def get_storage_estimate(self, instrument_key: str | None = None) -> dict:
+        """Get storage estimates (row counts) for data."""
+        with self.get_read_connection() as conn:
+            where = ""
+            params: list = []
+            if instrument_key:
+                safe_key = instrument_key.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+                where = "WHERE expired_instrument_key LIKE ? || '%' ESCAPE '\\'"
+                params = [safe_key]
+
+            hist_count = conn.execute(
+                f"SELECT COUNT(*) FROM historical_data {where}", params
+            ).fetchone()[0]
+
+            candle_where = ""
+            candle_params: list = []
+            if instrument_key:
+                candle_where = "WHERE instrument_key = ?"
+                candle_params = [instrument_key]
+
+            candle_count = conn.execute(
+                f"SELECT COUNT(*) FROM candle_data {candle_where}", candle_params
+            ).fetchone()[0]
+
+            return {
+                "historical_rows": hist_count,
+                "candle_rows": candle_count,
+                "total_rows": hist_count + candle_count,
+                "estimated_size_mb": round((hist_count + candle_count) * 100 / 1024 / 1024, 1),
+            }
 
     def get_historical_data_count(self, expired_instrument_key: str | None = None) -> int:
         with self.get_read_connection() as conn:

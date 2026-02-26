@@ -119,6 +119,8 @@ class PersistentTaskTracker:
 
     def flush(self) -> None:
         """Write all dirty tasks to DB."""
+        import time
+
         with self._dirty_lock:
             dirty_ids = list(self._dirty)
             self._dirty.clear()
@@ -127,25 +129,35 @@ class PersistentTaskTracker:
             task = self._tracker.get(task_id)
             if not task:
                 continue
-            try:
-                fields: dict = {}
-                if "status" in task:
-                    fields["status"] = task["status"]
-                if "progress" in task:
-                    fields["progress"] = task["progress"]
-                if "status_message" in task:
-                    fields["status_message"] = task["status_message"]
-                if "error" in task:
-                    fields["error_message"] = task["error"]
-                if task.get("status") in ("completed", "failed"):
-                    fields["completed_at"] = datetime.now().isoformat()
-                if fields:
+            fields: dict = {}
+            if "status" in task:
+                fields["status"] = task["status"]
+            if "progress" in task:
+                fields["progress"] = task["progress"]
+            if "status_message" in task:
+                fields["status_message"] = task["status_message"]
+            if "error" in task:
+                fields["error_message"] = task["error"]
+            if task.get("status") in ("completed", "failed"):
+                fields["completed_at"] = datetime.now().isoformat()
+            if not fields:
+                continue
+
+            # Retry up to 3 times on write-write conflicts (DuckDB MVCC transient errors)
+            for attempt in range(3):
+                try:
                     self.db_manager.tasks_repo.update_task(task_id, **fields)
-            except Exception:
-                logger.debug(f"Failed to flush task {task_id}", exc_info=True)
-                # Re-mark as dirty for next flush
-                with self._dirty_lock:
-                    self._dirty.add(task_id)
+                    break
+                except Exception as exc:
+                    is_last = attempt == 2
+                    if is_last:
+                        logger.debug(f"Failed to flush task {task_id} after 3 attempts", exc_info=True)
+                        # Re-mark as dirty for next flush cycle
+                        with self._dirty_lock:
+                            self._dirty.add(task_id)
+                    else:
+                        logger.debug(f"Flush attempt {attempt + 1} failed for {task_id}: {exc}, retrying...")
+                        time.sleep(0.1 * (attempt + 1))
 
     def _ensure_flush_timer(self) -> None:
         """Start periodic flush timer if not already running."""
