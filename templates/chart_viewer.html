@@ -1,0 +1,482 @@
+{% extends "base.html" %}
+
+{% block title %}Charts - ExpiryTrack{% endblock %}
+
+{% block breadcrumbs %}<li><a href="{{ url_for('analytics.analytics_page') }}" class="text-gray-500 hover:text-green-600">Analytics</a></li><li class="text-gray-700 font-medium">Charts</li>{% endblock %}
+
+{% block content %}
+<div class="max-w-7xl mx-auto">
+    <div class="flex items-center justify-between mb-6">
+        <h1 class="text-3xl font-bold supabase-text-gradient">Candlestick Chart Viewer</h1>
+        <div id="chart-info" class="text-sm text-gray-500 hidden">
+            <span id="chart-candle-count">0</span> candles loaded
+        </div>
+    </div>
+
+    <!-- Filters -->
+    <div class="card-minimal p-4 mb-6">
+        <div class="flex flex-wrap items-end gap-4">
+            <!-- Data Source Toggle -->
+            <div>
+                <label class="text-sm text-gray-500 font-medium block mb-1">Data Source</label>
+                <select id="chart-source" onchange="onSourceChange()" class="select select-bordered select-sm w-44">
+                    <option value="candle">Candle Data</option>
+                    <option value="contract">Contract Data</option>
+                </select>
+            </div>
+
+            <!-- Instrument Selector -->
+            <div>
+                <label class="text-sm text-gray-500 font-medium block mb-1">Instrument</label>
+                <select id="chart-instrument" onchange="onInstrumentChange()" class="select select-bordered select-sm w-56">
+                    <option value="">Select Instrument</option>
+                </select>
+            </div>
+
+            <!-- Contract-mode selectors (hidden by default) -->
+            <div id="expiry-group" class="hidden">
+                <label class="text-sm text-gray-500 font-medium block mb-1">Expiry Date</label>
+                <select id="chart-expiry" onchange="onExpiryChange()" class="select select-bordered select-sm w-44">
+                    <option value="">All Expiries</option>
+                </select>
+            </div>
+
+            <div id="contract-group" class="hidden">
+                <label class="text-sm text-gray-500 font-medium block mb-1">Contract</label>
+                <select id="chart-contract" class="select select-bordered select-sm w-64">
+                    <option value="">Select Contract</option>
+                </select>
+            </div>
+
+            <!-- Date Range -->
+            <div>
+                <label class="text-sm text-gray-500 font-medium block mb-1">From</label>
+                <input type="date" id="chart-from" class="input input-bordered input-sm w-40">
+            </div>
+            <div>
+                <label class="text-sm text-gray-500 font-medium block mb-1">To</label>
+                <input type="date" id="chart-to" class="input input-bordered input-sm w-40">
+            </div>
+
+            <button onclick="loadChart()" class="btn-supabase text-sm">Load Chart</button>
+        </div>
+
+        <!-- Timeframe Buttons -->
+        <div class="flex flex-wrap items-center gap-2 mt-4">
+            <span class="text-sm text-gray-500 font-medium">Timeframe:</span>
+            <div class="btn-group" id="timeframe-buttons">
+                <button onclick="setInterval('1minute')" class="btn btn-sm btn-active" data-interval="1minute">1m</button>
+                <button onclick="setInterval('5minute')" class="btn btn-sm" data-interval="5minute">5m</button>
+                <button onclick="setInterval('15minute')" class="btn btn-sm" data-interval="15minute">15m</button>
+                <button onclick="setInterval('1hour')" class="btn btn-sm" data-interval="1hour">1H</button>
+                <button onclick="setInterval('1day')" class="btn btn-sm" data-interval="1day">1D</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Chart Container -->
+    <div class="card-minimal overflow-hidden">
+        <div id="chart-container" style="height: 520px; position: relative;">
+            <div id="chart-placeholder" class="flex items-center justify-center h-full text-gray-400">
+                Select an instrument and click Load Chart to begin
+            </div>
+            <div id="chart-loading" class="hidden absolute inset-0 flex items-center justify-center bg-white/80 z-10">
+                <span class="loading loading-spinner loading-lg text-success"></span>
+            </div>
+        </div>
+    </div>
+
+    <!-- OHLCV Legend -->
+    <div id="chart-legend" class="card-minimal p-3 mt-4 hidden">
+        <div class="flex flex-wrap gap-6 text-sm">
+            <div><span class="text-gray-500">O:</span> <span id="legend-open" class="font-mono font-medium">-</span></div>
+            <div><span class="text-gray-500">H:</span> <span id="legend-high" class="font-mono font-medium">-</span></div>
+            <div><span class="text-gray-500">L:</span> <span id="legend-low" class="font-mono font-medium">-</span></div>
+            <div><span class="text-gray-500">C:</span> <span id="legend-close" class="font-mono font-medium">-</span></div>
+            <div><span class="text-gray-500">Vol:</span> <span id="legend-volume" class="font-mono font-medium">-</span></div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<!-- TradingView Lightweight Charts -->
+<script src="https://unpkg.com/lightweight-charts@4.2.2/dist/lightweight-charts.standalone.production.js"></script>
+<script>
+// ── State ──
+var currentInterval = '1minute';
+var chart = null;
+var candleSeries = null;
+var volumeSeries = null;
+
+// ── Helpers ──
+function fmtNum(n) { return n != null ? n.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '-'; }
+function fmtVol(n) { return n != null ? n.toLocaleString() : '-'; }
+
+function isDarkMode() {
+    return document.documentElement.getAttribute('data-theme') === 'dark';
+}
+
+function getChartColors() {
+    if (isDarkMode()) {
+        return {
+            bg: '#16213e',
+            text: '#a0aec0',
+            grid: '#2d3748',
+            border: '#2d3748',
+            crosshair: '#4a5568',
+            upColor: '#3ecf8e',
+            downColor: '#ef4444',
+            volumeUp: 'rgba(62, 207, 142, 0.3)',
+            volumeDown: 'rgba(239, 68, 68, 0.3)',
+        };
+    }
+    return {
+        bg: '#ffffff',
+        text: '#374151',
+        grid: '#f3f4f6',
+        border: '#e5e7eb',
+        crosshair: '#9ca3af',
+        upColor: '#16a34a',
+        downColor: '#dc2626',
+        volumeUp: 'rgba(22, 163, 74, 0.3)',
+        volumeDown: 'rgba(220, 38, 38, 0.3)',
+    };
+}
+
+// ── Source Toggle ──
+function onSourceChange() {
+    var src = document.getElementById('chart-source').value;
+    var expiryGroup = document.getElementById('expiry-group');
+    var contractGroup = document.getElementById('contract-group');
+
+    if (src === 'contract') {
+        expiryGroup.classList.remove('hidden');
+        contractGroup.classList.remove('hidden');
+        loadContractInstruments();
+    } else {
+        expiryGroup.classList.add('hidden');
+        contractGroup.classList.add('hidden');
+        loadCandleInstruments();
+    }
+}
+
+// ── Instrument Loaders ──
+async function loadCandleInstruments() {
+    var sel = document.getElementById('chart-instrument');
+    sel.innerHTML = '<option value="">Select Instrument</option>';
+    try {
+        var res = await fetch('/api/analytics/chart-instruments');
+        var data = await res.json();
+        (data.instruments || []).forEach(function(inst) {
+            var opt = document.createElement('option');
+            opt.value = inst.instrument_key;
+            opt.textContent = inst.symbol + (inst.segment ? ' (' + inst.segment + ')' : '');
+            sel.appendChild(opt);
+        });
+    } catch (e) { console.error('Failed to load candle instruments:', e); }
+}
+
+async function loadContractInstruments() {
+    var sel = document.getElementById('chart-instrument');
+    sel.innerHTML = '<option value="">Select Instrument</option>';
+    try {
+        var res = await fetch('/api/analytics/instruments-with-data');
+        var data = await res.json();
+        (data.instruments || []).forEach(function(inst) {
+            var opt = document.createElement('option');
+            opt.value = inst.instrument_key;
+            opt.textContent = inst.symbol;
+            sel.appendChild(opt);
+        });
+    } catch (e) { console.error('Failed to load contract instruments:', e); }
+}
+
+// ── Cascading Selectors ──
+async function onInstrumentChange() {
+    var src = document.getElementById('chart-source').value;
+    if (src === 'contract') {
+        await loadExpiryDates();
+        await loadContracts();
+    }
+}
+
+async function loadExpiryDates() {
+    var instrument = document.getElementById('chart-instrument').value;
+    var sel = document.getElementById('chart-expiry');
+    sel.innerHTML = '<option value="">All Expiries</option>';
+    if (!instrument) return;
+
+    try {
+        var res = await fetch('/api/analytics/expiry-dates?instrument=' + encodeURIComponent(instrument));
+        var data = await res.json();
+        (data.dates || []).forEach(function(d) {
+            var opt = document.createElement('option');
+            opt.value = d;
+            opt.textContent = d;
+            sel.appendChild(opt);
+        });
+    } catch (e) { console.error('Failed to load expiry dates:', e); }
+}
+
+async function onExpiryChange() {
+    await loadContracts();
+}
+
+async function loadContracts() {
+    var instrument = document.getElementById('chart-instrument').value;
+    var expiry = document.getElementById('chart-expiry').value;
+    var sel = document.getElementById('chart-contract');
+    sel.innerHTML = '<option value="">Select Contract</option>';
+    if (!instrument) return;
+
+    try {
+        var url = '/api/analytics/chart-contracts?instrument=' + encodeURIComponent(instrument);
+        if (expiry) url += '&expiry=' + encodeURIComponent(expiry);
+        var res = await fetch(url);
+        var data = await res.json();
+        (data.contracts || []).forEach(function(c) {
+            var opt = document.createElement('option');
+            opt.value = c.expired_instrument_key;
+            var label = c.trading_symbol || c.expired_instrument_key;
+            if (c.candle_count) label += ' (' + c.candle_count + ' candles)';
+            opt.textContent = label;
+            sel.appendChild(opt);
+        });
+    } catch (e) { console.error('Failed to load contracts:', e); }
+}
+
+// ── Timeframe ──
+function setInterval(interval) {
+    currentInterval = interval;
+    // Update active button styling
+    document.querySelectorAll('#timeframe-buttons button').forEach(function(btn) {
+        if (btn.getAttribute('data-interval') === interval) {
+            btn.classList.add('btn-active');
+        } else {
+            btn.classList.remove('btn-active');
+        }
+    });
+    loadChart();
+}
+
+// ── Chart Creation / Update ──
+function createChart() {
+    var container = document.getElementById('chart-container');
+    var placeholder = document.getElementById('chart-placeholder');
+    if (placeholder) placeholder.style.display = 'none';
+
+    // Destroy old chart
+    if (chart) {
+        chart.remove();
+        chart = null;
+        candleSeries = null;
+        volumeSeries = null;
+    }
+
+    var colors = getChartColors();
+
+    chart = LightweightCharts.createChart(container, {
+        width: container.clientWidth,
+        height: container.clientHeight,
+        layout: {
+            background: { type: 'solid', color: colors.bg },
+            textColor: colors.text,
+        },
+        grid: {
+            vertLines: { color: colors.grid },
+            horzLines: { color: colors.grid },
+        },
+        crosshair: {
+            mode: LightweightCharts.CrosshairMode.Normal,
+            vertLine: { color: colors.crosshair, width: 1, style: 3 },
+            horzLine: { color: colors.crosshair, width: 1, style: 3 },
+        },
+        rightPriceScale: {
+            borderColor: colors.border,
+        },
+        timeScale: {
+            borderColor: colors.border,
+            timeVisible: true,
+            secondsVisible: false,
+        },
+    });
+
+    candleSeries = chart.addCandlestickSeries({
+        upColor: colors.upColor,
+        downColor: colors.downColor,
+        borderDownColor: colors.downColor,
+        borderUpColor: colors.upColor,
+        wickDownColor: colors.downColor,
+        wickUpColor: colors.upColor,
+    });
+
+    volumeSeries = chart.addHistogramSeries({
+        priceFormat: { type: 'volume' },
+        priceScaleId: '',
+    });
+
+    volumeSeries.priceScale().applyOptions({
+        scaleMargins: { top: 0.8, bottom: 0 },
+    });
+
+    // Crosshair move — update legend
+    chart.subscribeCrosshairMove(function(param) {
+        if (!param || !param.time) {
+            return;
+        }
+        var candle = param.seriesData.get(candleSeries);
+        var vol = param.seriesData.get(volumeSeries);
+        if (candle) {
+            document.getElementById('legend-open').textContent = fmtNum(candle.open);
+            document.getElementById('legend-high').textContent = fmtNum(candle.high);
+            document.getElementById('legend-low').textContent = fmtNum(candle.low);
+            document.getElementById('legend-close').textContent = fmtNum(candle.close);
+        }
+        if (vol) {
+            document.getElementById('legend-volume').textContent = fmtVol(vol.value);
+        }
+    });
+
+    // Responsive resize
+    var resizeObserver = new ResizeObserver(function(entries) {
+        for (var i = 0; i < entries.length; i++) {
+            var entry = entries[i];
+            var w = entry.contentRect.width;
+            var h = entry.contentRect.height;
+            chart.applyOptions({ width: w, height: h });
+        }
+    });
+    resizeObserver.observe(container);
+
+    return chart;
+}
+
+function parseTimestamp(ts) {
+    // lightweight-charts expects UTC seconds for time-based data
+    // Parse ISO timestamp string to epoch seconds
+    var d = new Date(ts);
+    return Math.floor(d.getTime() / 1000);
+}
+
+async function loadChart() {
+    var instrument = document.getElementById('chart-instrument').value;
+    if (!instrument) {
+        showToast('Please select an instrument', 'warning');
+        return;
+    }
+
+    var src = document.getElementById('chart-source').value;
+    var contract = '';
+    if (src === 'contract') {
+        contract = document.getElementById('chart-contract').value;
+        if (!contract) {
+            showToast('Please select a contract', 'warning');
+            return;
+        }
+    }
+
+    var fromDate = document.getElementById('chart-from').value;
+    var toDate = document.getElementById('chart-to').value;
+
+    // Build URL
+    var url = '/api/analytics/candles?instrument=' + encodeURIComponent(instrument)
+        + '&interval=' + encodeURIComponent(currentInterval);
+    if (contract) url += '&contract=' + encodeURIComponent(contract);
+    if (fromDate) url += '&from=' + encodeURIComponent(fromDate);
+    if (toDate) url += '&to=' + encodeURIComponent(toDate);
+
+    // Show loading
+    document.getElementById('chart-loading').classList.remove('hidden');
+
+    try {
+        var res = await fetch(url);
+        var json = await res.json();
+
+        if (json.error) {
+            showToast(json.error, 'error');
+            document.getElementById('chart-loading').classList.add('hidden');
+            return;
+        }
+
+        var candles = json.data || [];
+        if (candles.length === 0) {
+            showToast('No candle data available for the selected parameters', 'warning');
+            document.getElementById('chart-loading').classList.add('hidden');
+            return;
+        }
+
+        // Create chart if not yet created
+        if (!chart) createChart();
+
+        var colors = getChartColors();
+
+        // Transform data for lightweight-charts
+        var candleData = [];
+        var volumeData = [];
+        for (var i = 0; i < candles.length; i++) {
+            var c = candles[i];
+            var t = parseTimestamp(c.timestamp);
+            candleData.push({
+                time: t,
+                open: c.open,
+                high: c.high,
+                low: c.low,
+                close: c.close,
+            });
+            volumeData.push({
+                time: t,
+                value: c.volume,
+                color: c.close >= c.open ? colors.volumeUp : colors.volumeDown,
+            });
+        }
+
+        candleSeries.setData(candleData);
+        volumeSeries.setData(volumeData);
+        chart.timeScale().fitContent();
+
+        // Update UI
+        document.getElementById('chart-info').classList.remove('hidden');
+        document.getElementById('chart-candle-count').textContent = candles.length.toLocaleString();
+        document.getElementById('chart-legend').classList.remove('hidden');
+
+        // Set legend to last candle
+        var last = candles[candles.length - 1];
+        document.getElementById('legend-open').textContent = fmtNum(last.open);
+        document.getElementById('legend-high').textContent = fmtNum(last.high);
+        document.getElementById('legend-low').textContent = fmtNum(last.low);
+        document.getElementById('legend-close').textContent = fmtNum(last.close);
+        document.getElementById('legend-volume').textContent = fmtVol(last.volume);
+
+    } catch (e) {
+        showToast('Error loading chart: ' + e.message, 'error');
+    } finally {
+        document.getElementById('chart-loading').classList.add('hidden');
+    }
+}
+
+// ── Theme change listener ──
+// Re-create chart when theme changes so colors update
+var origToggleTheme = window.toggleTheme;
+window.toggleTheme = function() {
+    origToggleTheme();
+    if (chart) {
+        // Store current data state
+        var hadChart = true;
+        createChart();
+        // Reload chart data
+        loadChart();
+    }
+};
+
+// ── Init ──
+document.addEventListener('DOMContentLoaded', function() {
+    loadCandleInstruments();
+    // Set default date range: last 30 days
+    var now = new Date();
+    var thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+    document.getElementById('chart-to').value = now.toISOString().split('T')[0];
+    document.getElementById('chart-from').value = thirtyDaysAgo.toISOString().split('T')[0];
+});
+</script>
+{% endblock %}

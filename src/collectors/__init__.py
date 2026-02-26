@@ -2,4 +2,4 @@
 
 from .expiry_tracker import ExpiryTracker
 
-__all__ = ['ExpiryTracker']
+__all__ = ["ExpiryTracker"]

@@ -2,23 +2,21 @@
 OAuth 2.0 Authentication Manager for Upstox API
 Uses database for credential storage - zero config
 """
-import json
+
+import logging
+import secrets
 import time
 import webbrowser
-from pathlib import Path
-from typing import Optional, Dict
-from urllib.parse import urlencode, parse_qs, urlparse
-import logging
-import hashlib
-import secrets
+from urllib.parse import urlencode
 
-from flask import Flask, request, redirect, session
 import httpx
+from flask import Flask, request
 
 from ..config import config
 from ..database.manager import DatabaseManager
 
 logger = logging.getLogger(__name__)
+
 
 class AuthManager:
     """
@@ -26,10 +24,11 @@ class AuthManager:
     Credentials stored encrypted in database
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize authentication manager"""
         self.base_url = config.UPSTOX_BASE_URL
         self.db_manager = DatabaseManager()
+        self._oauth_state: str | None = None
 
         # Load credentials from database
         self._load_credentials()
@@ -39,11 +38,11 @@ class AuthManager:
         creds = self.db_manager.get_credentials()
 
         if creds:
-            self.api_key = creds['api_key']
-            self.api_secret = creds['api_secret']
-            self.redirect_uri = creds['redirect_uri']
-            self.access_token = creds['access_token']
-            self.token_expiry = creds['token_expiry']
+            self.api_key = creds["api_key"]
+            self.api_secret = creds["api_secret"]
+            self.redirect_uri = creds["redirect_uri"]
+            self.access_token = creds["access_token"]
+            self.token_expiry = creds["token_expiry"]
             return True
         else:
             # No credentials yet
@@ -58,7 +57,7 @@ class AuthManager:
         """Check if API credentials are configured"""
         return bool(self.api_key and self.api_secret)
 
-    def save_credentials(self, api_key: str, api_secret: str, redirect_uri: str = None) -> bool:
+    def save_credentials(self, api_key: str, api_secret: str, redirect_uri: str | None = None) -> bool:
         """Save API credentials to database"""
         success = self.db_manager.save_credentials(api_key, api_secret, redirect_uri)
 
@@ -68,17 +67,14 @@ class AuthManager:
             self.redirect_uri = redirect_uri or config.UPSTOX_REDIRECT_URI
             logger.info("Credentials saved to database")
 
-        return success
+        return bool(success)
 
     def is_token_valid(self) -> bool:
         """Check if current token is valid"""
         if not self.access_token:
             return False
 
-        if self.token_expiry and time.time() >= self.token_expiry:
-            return False
-
-        return True
+        return not (self.token_expiry and time.time() >= self.token_expiry)
 
     def get_authorization_url(self) -> str:
         """
@@ -90,15 +86,24 @@ class AuthManager:
         if not self.has_credentials():
             raise ValueError("API credentials not configured. Please set them first.")
 
-        params = {
-            'client_id': self.api_key,
-            'redirect_uri': self.redirect_uri,
-            'response_type': 'code',
-            'state': secrets.token_urlsafe(32)
-        }
+        state = secrets.token_urlsafe(32)
+        self._oauth_state = state
+
+        params = {"client_id": self.api_key, "redirect_uri": self.redirect_uri, "response_type": "code", "state": state}
 
         auth_url = f"https://api.upstox.com/v2/login/authorization/dialog?{urlencode(params)}"
         return auth_url
+
+    def validate_oauth_state(self, state: str) -> bool:
+        """Validate OAuth state parameter against stored state"""
+        expected = getattr(self, "_oauth_state", None)
+        if not expected or not state:
+            return False
+        return secrets.compare_digest(expected, state)
+
+    def clear_oauth_state(self) -> None:
+        """Clear stored OAuth state after validation"""
+        self._oauth_state = None
 
     async def exchange_code_for_token(self, auth_code: str) -> bool:
         """
@@ -116,17 +121,14 @@ class AuthManager:
         url = f"{self.base_url}/login/authorization/token"
 
         data = {
-            'code': auth_code,
-            'client_id': self.api_key,
-            'client_secret': self.api_secret,
-            'redirect_uri': self.redirect_uri,
-            'grant_type': 'authorization_code'
+            "code": auth_code,
+            "client_id": self.api_key,
+            "client_secret": self.api_secret,
+            "redirect_uri": self.redirect_uri,
+            "grant_type": "authorization_code",
         }
 
-        headers = {
-            'Accept': 'application/json',
-            'Content-Type': 'application/x-www-form-urlencoded'
-        }
+        headers = {"Accept": "application/json", "Content-Type": "application/x-www-form-urlencoded"}
 
         try:
             async with httpx.AsyncClient() as client:
@@ -134,10 +136,10 @@ class AuthManager:
 
                 if response.status_code == 200:
                     token_data = response.json()
-                    self.access_token = token_data.get('access_token')
+                    self.access_token = token_data.get("access_token")
 
                     # Calculate token expiry (usually 1 day)
-                    expires_in = token_data.get('expires_in', 86400)
+                    expires_in = token_data.get("expires_in", 86400)
                     self.token_expiry = time.time() + expires_in - 300  # 5 min buffer
 
                     # Save token to database
@@ -165,14 +167,9 @@ class AuthManager:
         """
         # Check if credentials are configured
         if not self.has_credentials():
-            print("\n" + "="*50)
-            print("API Credentials Required")
-            print("="*50)
-            print("Please configure your Upstox API credentials first.")
-            print("You can do this via:")
-            print("1. Web interface: python app.py")
-            print("2. CLI: python main.py setup")
-            print("="*50)
+            logger.warning(
+                "API Credentials Required — configure via web interface (python app.py) or CLI (python main.py setup)"
+            )
             return False
 
         if self.is_token_valid():
@@ -183,29 +180,28 @@ class AuthManager:
         app = Flask(__name__)
         app.secret_key = secrets.token_hex(32)
 
-        auth_complete = {'status': False}
+        auth_complete = {"status": False}
 
-        @app.route('/upstox/callback')
-        def callback():
+        @app.route("/upstox/callback")
+        def callback() -> str | tuple[str, int]:
             """Handle OAuth callback"""
-            auth_code = request.args.get('code')
-            error = request.args.get('error')
+            auth_code = request.args.get("code")
+            error = request.args.get("error")
 
             if error:
-                auth_complete['status'] = False
+                auth_complete["status"] = False
                 return f"Authentication failed: {error}", 400
 
             if auth_code:
                 # Run async function in sync context
                 import asyncio
+
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
-                success = loop.run_until_complete(
-                    self.exchange_code_for_token(auth_code)
-                )
+                success = loop.run_until_complete(self.exchange_code_for_token(auth_code))
                 loop.close()
 
-                auth_complete['status'] = success
+                auth_complete["status"] = success
                 if success:
                     return """
                     <html>
@@ -222,31 +218,23 @@ class AuthManager:
 
             return "No authorization code received", 400
 
-        @app.route('/shutdown')
-        def shutdown():
-            """Shutdown Flask server"""
-            func = request.environ.get('werkzeug.server.shutdown')
-            if func:
-                func()
-            return "Server shutting down..."
-
         # Get authorization URL
         auth_url = self.get_authorization_url()
-        print(f"\nPlease authenticate at: {auth_url}\n")
+        logger.info(f"Please authenticate at: {auth_url}")
 
         if open_browser:
             webbrowser.open(auth_url)
 
         # Run Flask server
         try:
-            app.run(host='127.0.0.1', port=5000, debug=False)
+            app.run(host=config.HOST, port=config.PORT, debug=False)
         except Exception as e:
             logger.error(f"Failed to start callback server: {e}")
             return False
 
-        return auth_complete['status']
+        return auth_complete["status"]
 
-    def get_headers(self) -> Dict[str, str]:
+    def get_headers(self) -> dict[str, str]:
         """
         Get headers with authentication token
 
@@ -260,9 +248,9 @@ class AuthManager:
             raise ValueError("Invalid or expired token. Please authenticate first.")
 
         return {
-            'Authorization': f'Bearer {self.access_token}',
-            'Accept': 'application/json',
-            'Content-Type': 'application/json'
+            "Authorization": f"Bearer {self.access_token}",
+            "Accept": "application/json",
+            "Content-Type": "application/json",
         }
 
     def clear_tokens(self) -> None:

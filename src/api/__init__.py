@@ -2,4 +2,4 @@
 
 from .client import UpstoxAPIClient
 
-__all__ = ['UpstoxAPIClient']
+__all__ = ["UpstoxAPIClient"]

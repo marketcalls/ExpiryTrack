@@ -1,0 +1,386 @@
+{% extends "base.html" %}
+
+{% block title %}Analytics - ExpiryTrack{% endblock %}
+
+{% block breadcrumbs %}<li class="text-gray-700 font-medium">Analytics</li>{% endblock %}
+
+{% block content %}
+<div class="max-w-7xl mx-auto">
+    <div class="flex items-center justify-between mb-8">
+        <h1 class="text-3xl font-bold supabase-text-gradient">Analytics Dashboard</h1>
+        <button onclick="refreshAll()" class="btn-supabase text-sm">Refresh</button>
+    </div>
+
+    <!-- Summary Cards -->
+    <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4 mb-8">
+        <div class="card-minimal p-4 text-center">
+            <div id="s-instruments" class="text-2xl font-bold text-gray-800">-</div>
+            <div class="text-xs text-gray-500">Instruments</div>
+        </div>
+        <div class="card-minimal p-4 text-center">
+            <div id="s-contracts" class="text-2xl font-bold text-gray-800">-</div>
+            <div class="text-xs text-gray-500">Contracts</div>
+        </div>
+        <div class="card-minimal p-4 text-center">
+            <div id="s-fetched" class="text-2xl font-bold text-green-600">-</div>
+            <div class="text-xs text-gray-500">Fetched</div>
+        </div>
+        <div class="card-minimal p-4 text-center">
+            <div id="s-candles" class="text-2xl font-bold text-gray-800">-</div>
+            <div class="text-xs text-gray-500">Candles</div>
+        </div>
+        <div class="card-minimal p-4 text-center">
+            <div id="s-with-data" class="text-2xl font-bold text-gray-800">-</div>
+            <div class="text-xs text-gray-500">With Data</div>
+        </div>
+        <div class="card-minimal p-4 text-center">
+            <div id="s-days" class="text-2xl font-bold text-gray-800">-</div>
+            <div class="text-xs text-gray-500">Trading Days</div>
+        </div>
+        <div class="card-minimal p-4 text-center">
+            <div id="s-coverage" class="text-2xl font-bold text-blue-600">-</div>
+            <div class="text-xs text-gray-500">Coverage %</div>
+        </div>
+    </div>
+
+    <!-- Charts Row 1 -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+        <!-- Candles per Day -->
+        <div class="card-minimal p-6">
+            <h3 class="text-lg font-semibold mb-4">Candles Collected per Day</h3>
+            <canvas id="chart-candles-day" height="200"></canvas>
+        </div>
+
+        <!-- Contracts by Type -->
+        <div class="card-minimal p-6">
+            <h3 class="text-lg font-semibold mb-4">Contracts by Type</h3>
+            <canvas id="chart-contracts-type" height="200"></canvas>
+        </div>
+    </div>
+
+    <!-- Charts Row 2 -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+        <!-- Contracts by Instrument -->
+        <div class="card-minimal p-6">
+            <h3 class="text-lg font-semibold mb-4">Contracts by Instrument</h3>
+            <canvas id="chart-contracts-instrument" height="200"></canvas>
+        </div>
+
+        <!-- Data Coverage by Expiry -->
+        <div class="card-minimal p-6">
+            <div class="flex items-center justify-between mb-4">
+                <h3 class="text-lg font-semibold">Data Coverage by Expiry</h3>
+                <a href="{{ url_for('status.download_status_page') }}" class="text-sm text-green-600 hover:text-green-700 font-medium">View Details &rarr;</a>
+            </div>
+            <canvas id="chart-coverage" height="200"></canvas>
+        </div>
+    </div>
+
+    <!-- Charts Row 3 -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+        <!-- Volume by Expiry -->
+        <div class="card-minimal p-6">
+            <h3 class="text-lg font-semibold mb-4">Total Volume by Expiry</h3>
+            <canvas id="chart-volume" height="200"></canvas>
+        </div>
+
+        <!-- Storage Breakdown -->
+        <div class="card-minimal p-6">
+            <h3 class="text-lg font-semibold mb-4">Storage Breakdown (rows)</h3>
+            <canvas id="chart-storage" height="200"></canvas>
+        </div>
+    </div>
+
+    <!-- Quality Check Panel -->
+    <div class="card-minimal p-6 mb-6">
+        <div class="flex items-center justify-between mb-4">
+            <h3 class="text-lg font-semibold">Data Quality</h3>
+            <div class="flex items-center gap-2">
+                <button onclick="fixQualityIssues()" id="qc-fix-btn" class="btn btn-sm btn-outline btn-warning hidden">Fix Issues</button>
+                <button onclick="checkMarketHours()" class="btn btn-sm btn-outline btn-info">Market Hours</button>
+                <button onclick="runQualityCheck()" id="qc-btn" class="btn-supabase text-sm">Run Check</button>
+            </div>
+        </div>
+        <div id="qc-results" class="text-sm text-gray-500">Click "Run Check" to validate data integrity.</div>
+    </div>
+
+    <!-- Quality Report History -->
+    <div class="card-minimal p-6 mb-6">
+        <div class="flex items-center justify-between mb-4">
+            <h3 class="text-lg font-semibold">Quality Report History</h3>
+            <button onclick="loadQualityReports()" class="btn btn-sm btn-ghost">Refresh</button>
+        </div>
+        <div id="qc-history" class="text-sm text-gray-500">Loading reports...</div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<!-- Chart.js from CDN -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
+<script>
+const COLORS = {
+    green: '#3ecf8e',
+    blue: '#3b82f6',
+    red: '#ef4444',
+    yellow: '#f59e0b',
+    purple: '#8b5cf6',
+    gray: '#6b7280',
+    teal: '#14b8a6',
+};
+const CHART_BG = [COLORS.green, COLORS.blue, COLORS.red, COLORS.yellow, COLORS.purple, COLORS.teal, COLORS.gray];
+
+let charts = {};
+
+function fmt(n) {
+    if (n == null) return '-';
+    return n.toLocaleString();
+}
+
+// ── Summary ──
+async function loadSummary() {
+    try {
+        const res = await fetch('/api/analytics/summary');
+        const d = await res.json();
+        document.getElementById('s-instruments').textContent = fmt(d.instruments);
+        document.getElementById('s-contracts').textContent = fmt(d.contracts);
+        document.getElementById('s-fetched').textContent = fmt(d.fetched_contracts);
+        document.getElementById('s-candles').textContent = fmt(d.total_candles);
+        document.getElementById('s-with-data').textContent = fmt(d.contracts_with_data);
+        document.getElementById('s-days').textContent = fmt(d.trading_days);
+        document.getElementById('s-coverage').textContent = (d.coverage_pct ?? 0) + '%';
+    } catch (e) { console.error('Summary error:', e); }
+}
+
+// ── Chart helpers ──
+function makeChart(id, type, labels, datasets, opts = {}) {
+    if (charts[id]) charts[id].destroy();
+    const ctx = document.getElementById(id).getContext('2d');
+    charts[id] = new Chart(ctx, {
+        type,
+        data: { labels, datasets },
+        options: {
+            responsive: true,
+            maintainAspectRatio: true,
+            plugins: { legend: { display: opts.legend !== false, position: 'bottom' } },
+            scales: type === 'pie' || type === 'doughnut' ? {} : {
+                y: { beginAtZero: true, ticks: { callback: v => v.toLocaleString() } }
+            },
+            ...opts,
+        },
+    });
+}
+
+// ── Load charts ──
+async function loadCandlesPerDay() {
+    const res = await fetch('/api/analytics/candles-per-day');
+    const d = await res.json();
+    makeChart('chart-candles-day', 'bar', d.labels, [{
+        label: 'Candles',
+        data: d.data,
+        backgroundColor: COLORS.green + '99',
+        borderColor: COLORS.green,
+        borderWidth: 1,
+    }], { legend: false });
+}
+
+async function loadContractsByType() {
+    const res = await fetch('/api/analytics/contracts-by-type');
+    const d = await res.json();
+    makeChart('chart-contracts-type', 'doughnut', d.labels, [{
+        data: d.data,
+        backgroundColor: CHART_BG.slice(0, d.labels.length),
+    }]);
+}
+
+async function loadContractsByInstrument() {
+    const res = await fetch('/api/analytics/contracts-by-instrument');
+    const d = await res.json();
+    makeChart('chart-contracts-instrument', 'bar', d.labels, [{
+        label: 'Contracts',
+        data: d.data,
+        backgroundColor: CHART_BG.slice(0, d.labels.length),
+    }], { legend: false });
+}
+
+async function loadCoverage() {
+    const res = await fetch('/api/analytics/data-coverage');
+    const d = await res.json();
+    makeChart('chart-coverage', 'bar', d.labels, [
+        { label: 'Total', data: d.total, backgroundColor: COLORS.gray + '66' },
+        { label: 'Fetched', data: d.fetched, backgroundColor: COLORS.green + '99' },
+    ]);
+}
+
+async function loadVolume() {
+    const res = await fetch('/api/analytics/volume-by-expiry');
+    const d = await res.json();
+    makeChart('chart-volume', 'bar', d.labels, [{
+        label: 'Volume',
+        data: d.data,
+        backgroundColor: COLORS.blue + '99',
+        borderColor: COLORS.blue,
+        borderWidth: 1,
+    }], { legend: false });
+}
+
+async function loadStorage() {
+    const res = await fetch('/api/analytics/storage');
+    const d = await res.json();
+    const labels = Object.keys(d);
+    const data = Object.values(d);
+    makeChart('chart-storage', 'doughnut', labels, [{
+        data,
+        backgroundColor: CHART_BG.slice(0, labels.length),
+    }]);
+}
+
+// ── Quality Check ──
+async function runQualityCheck() {
+    const btn = document.getElementById('qc-btn');
+    const fixBtn = document.getElementById('qc-fix-btn');
+    const div = document.getElementById('qc-results');
+    btn.disabled = true;
+    btn.textContent = 'Running...';
+    div.innerHTML = '<span class="text-gray-400">Running quality checks...</span>';
+
+    try {
+        const res = await fetch('/api/quality/run', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}' });
+        const r = await res.json();
+        const passColor = r.passed ? 'text-green-600' : 'text-red-600';
+        let html = `<div class="grid grid-cols-4 gap-4 mb-3">
+            <div><span class="font-semibold">${r.checks_run}</span> checks run</div>
+            <div><span class="font-semibold text-green-600">${r.checks_passed}</span> passed</div>
+            <div><span class="font-semibold text-red-600">${r.errors}</span> errors</div>
+            <div><span class="font-semibold text-yellow-600">${r.warnings}</span> warnings</div>
+        </div>
+        <div class="${passColor} font-semibold mb-2">${r.passed ? 'PASSED' : 'FAILED'}</div>`;
+
+        if (r.violations && r.violations.length > 0) {
+            fixBtn.classList.remove('hidden');
+            html += '<div class="max-h-40 overflow-y-auto text-xs font-mono bg-gray-50 p-2 rounded border">';
+            r.violations.slice(0, 30).forEach(v => {
+                const icon = v.severity === 'error' ? 'text-red-500' : 'text-yellow-500';
+                html += `<div class="${icon}">[${escapeHtml(v.severity.toUpperCase())}] ${escapeHtml(v.check)}: ${escapeHtml(v.message)}</div>`;
+            });
+            if (r.violations.length > 30) html += `<div class="text-gray-400">...${r.violations.length - 30} more</div>`;
+            html += '</div>';
+        } else {
+            fixBtn.classList.add('hidden');
+        }
+        div.innerHTML = html;
+    } catch (e) {
+        div.innerHTML = `<span class="text-red-500">Error: ${escapeHtml(e.message)}</span>`;
+    }
+    btn.disabled = false;
+    btn.textContent = 'Run Check';
+}
+
+// ── Fix Quality Issues ──
+async function fixQualityIssues() {
+    const btn = document.getElementById('qc-fix-btn');
+    if (!confirm('Auto-fix quality issues? This will:\n- Re-mark orphan contracts as unfetched\n- Remove duplicate timestamps\n\nThis action modifies the database.')) return;
+
+    btn.disabled = true;
+    btn.textContent = 'Fixing...';
+
+    try {
+        const res = await fetch('/api/quality/fix', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}' });
+        const r = await res.json();
+        if (r.success) {
+            showToast(`Fixed: ${r.orphans_reset} orphans reset, ${r.duplicates_removed} duplicates removed`, 'success');
+            runQualityCheck();  // Re-run check to show updated results
+        } else {
+            showToast('Fix failed: ' + (r.error || 'Unknown error'), 'error');
+        }
+    } catch (e) {
+        showToast('Error: ' + e.message, 'error');
+    }
+    btn.disabled = false;
+    btn.textContent = 'Fix Issues';
+}
+
+// ── Market Hours Check ──
+async function checkMarketHours() {
+    const div = document.getElementById('qc-results');
+    div.innerHTML = '<span class="text-gray-400">Checking market hours...</span>';
+
+    try {
+        const res = await fetch('/api/quality/market-hours');
+        const r = await res.json();
+
+        let html = `<div class="mb-3">
+            <span class="font-semibold">${r.outside_hours.toLocaleString()}</span> candles outside market hours (9:15-15:30 IST)
+        </div>`;
+
+        if (r.low_candle_days && r.low_candle_days.length > 0) {
+            html += `<div class="font-semibold text-yellow-600 mb-2">${r.low_candle_days.length} days with low candle counts:</div>`;
+            html += '<div class="max-h-40 overflow-y-auto text-xs font-mono bg-gray-50 p-2 rounded border">';
+            r.low_candle_days.forEach(d => {
+                html += `<div>${escapeHtml(d.date)} — ${escapeHtml(d.instrument)}: ${escapeHtml(String(d.candle_count))}/${escapeHtml(String(d.expected))} candles</div>`;
+            });
+            html += '</div>';
+        } else {
+            html += '<div class="text-green-600 font-semibold">All trading days have adequate candle counts.</div>';
+        }
+        div.innerHTML = html;
+    } catch (e) {
+        div.innerHTML = `<span class="text-red-500">Error: ${escapeHtml(e.message)}</span>`;
+    }
+}
+
+// ── Quality Report History ──
+async function loadQualityReports() {
+    const div = document.getElementById('qc-history');
+    try {
+        const res = await fetch('/api/quality/reports');
+        const reports = await res.json();
+
+        if (reports.length === 0) {
+            div.innerHTML = '<span class="text-gray-400">No quality reports yet. Run a check to generate one.</span>';
+            return;
+        }
+
+        let html = '<table class="table table-sm w-full"><thead><tr class="text-xs text-gray-500 uppercase">';
+        html += '<th>Date</th><th>Instrument</th><th class="text-right">Checks</th><th class="text-right">Passed</th><th class="text-right">Errors</th><th class="text-right">Warnings</th><th>Result</th>';
+        html += '</tr></thead><tbody>';
+
+        reports.forEach(r => {
+            const resultBadge = r.passed
+                ? '<span class="badge badge-sm badge-success">PASS</span>'
+                : '<span class="badge badge-sm badge-error">FAIL</span>';
+            html += `<tr>
+                <td class="text-xs">${r.run_date}</td>
+                <td class="text-xs">${r.instrument_key || 'All'}</td>
+                <td class="text-right">${r.checks_run}</td>
+                <td class="text-right text-green-600">${r.checks_passed}</td>
+                <td class="text-right text-red-600">${r.errors}</td>
+                <td class="text-right text-yellow-600">${r.warnings}</td>
+                <td>${resultBadge}</td>
+            </tr>`;
+        });
+
+        html += '</tbody></table>';
+        div.innerHTML = html;
+    } catch (e) {
+        div.innerHTML = `<span class="text-red-500">Error loading reports: ${escapeHtml(e.message)}</span>`;
+    }
+}
+
+// ── Refresh all ──
+function refreshAll() {
+    loadSummary();
+    loadCandlesPerDay();
+    loadContractsByType();
+    loadContractsByInstrument();
+    loadCoverage();
+    loadVolume();
+    loadStorage();
+    loadQualityReports();
+}
+
+// Init
+document.addEventListener('DOMContentLoaded', refreshAll);
+</script>
+{% endblock %}

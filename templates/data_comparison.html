@@ -1,0 +1,379 @@
+{% extends "base.html" %}
+
+{% block title %}Data Comparison - ExpiryTrack{% endblock %}
+
+{% block breadcrumbs %}
+<li><a href="{{ url_for('admin.data_management_page') }}" class="text-gray-500 hover:text-green-600">Data Management</a></li>
+<li class="text-gray-700 font-medium">Data Comparison</li>
+{% endblock %}
+
+{% block content %}
+<div class="max-w-6xl mx-auto">
+    <div class="flex items-center justify-between mb-8">
+        <h1 class="text-3xl font-bold supabase-text-gradient">Data Comparison</h1>
+    </div>
+
+    <!-- Step 1: Upload reference file and select instrument -->
+    <div id="step-config" class="card-minimal p-6 mb-6">
+        <h3 class="text-lg font-semibold mb-2">Compare External Data Against Stored Data</h3>
+        <p class="text-sm text-gray-500 mb-4">
+            Upload a reference CSV dataset and compare it against stored historical data for a specific instrument and expiry.
+        </p>
+
+        <form id="compare-form" enctype="multipart/form-data">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                <!-- Left: File upload -->
+                <div>
+                    <label class="text-sm text-gray-500 font-medium block mb-1">Reference File (CSV)</label>
+                    <input type="file" id="compare-file" name="file"
+                           accept=".csv,.parquet"
+                           class="file-input file-input-bordered file-input-sm w-full" />
+                    <p class="text-xs text-gray-400 mt-1">
+                        Must contain columns: timestamp, open, high, low, close, volume (and optionally oi).
+                    </p>
+                </div>
+
+                <!-- Right: Instrument + Expiry selection -->
+                <div class="space-y-3">
+                    <div>
+                        <label class="text-sm text-gray-500 font-medium block mb-1">Instrument</label>
+                        <select id="compare-instrument" onchange="loadCompareExpiries()" class="select select-bordered select-sm w-full">
+                            <option value="">Select instrument...</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="text-sm text-gray-500 font-medium block mb-1">Expiry Date</label>
+                        <select id="compare-expiry" class="select select-bordered select-sm w-full">
+                            <option value="">Select expiry...</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Column mapping (optional, for non-standard column names) -->
+            <details class="mb-4">
+                <summary class="text-sm text-gray-500 cursor-pointer hover:text-gray-700">
+                    Advanced: Column name mapping (if your file uses different column names)
+                </summary>
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3 p-4 bg-gray-50 rounded-lg">
+                    <div>
+                        <label class="text-xs text-gray-500 block mb-1">Timestamp column</label>
+                        <input type="text" id="map-timestamp" value="timestamp" class="input input-bordered input-xs w-full" />
+                    </div>
+                    <div>
+                        <label class="text-xs text-gray-500 block mb-1">Open column</label>
+                        <input type="text" id="map-open" value="open" class="input input-bordered input-xs w-full" />
+                    </div>
+                    <div>
+                        <label class="text-xs text-gray-500 block mb-1">High column</label>
+                        <input type="text" id="map-high" value="high" class="input input-bordered input-xs w-full" />
+                    </div>
+                    <div>
+                        <label class="text-xs text-gray-500 block mb-1">Low column</label>
+                        <input type="text" id="map-low" value="low" class="input input-bordered input-xs w-full" />
+                    </div>
+                    <div>
+                        <label class="text-xs text-gray-500 block mb-1">Close column</label>
+                        <input type="text" id="map-close" value="close" class="input input-bordered input-xs w-full" />
+                    </div>
+                    <div>
+                        <label class="text-xs text-gray-500 block mb-1">Volume column</label>
+                        <input type="text" id="map-volume" value="volume" class="input input-bordered input-xs w-full" />
+                    </div>
+                    <div>
+                        <label class="text-xs text-gray-500 block mb-1">OI column</label>
+                        <input type="text" id="map-oi" value="oi" class="input input-bordered input-xs w-full" />
+                    </div>
+                </div>
+            </details>
+
+            <div class="flex items-center gap-4">
+                <button type="submit" class="btn-supabase text-sm" id="btn-compare">
+                    Compare Data
+                </button>
+                <span id="compare-error" class="text-sm text-red-600 hidden"></span>
+            </div>
+        </form>
+    </div>
+
+    <!-- Comparison Results (hidden until comparison done) -->
+    <div id="step-results" class="hidden">
+        <!-- Summary Cards -->
+        <div class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
+            <div class="card-minimal p-4 text-center">
+                <div id="stat-uploaded" class="text-2xl font-bold text-gray-800">-</div>
+                <div class="text-xs text-gray-500">Uploaded Rows</div>
+            </div>
+            <div class="card-minimal p-4 text-center">
+                <div id="stat-stored" class="text-2xl font-bold text-gray-800">-</div>
+                <div class="text-xs text-gray-500">Stored Rows</div>
+            </div>
+            <div class="card-minimal p-4 text-center">
+                <div id="stat-matched" class="text-2xl font-bold text-blue-600">-</div>
+                <div class="text-xs text-gray-500">Matched (by timestamp)</div>
+            </div>
+            <div class="card-minimal p-4 text-center">
+                <div id="stat-identical" class="text-2xl font-bold text-green-600">-</div>
+                <div class="text-xs text-gray-500">Identical Rows</div>
+            </div>
+            <div class="card-minimal p-4 text-center">
+                <div id="stat-mismatches" class="text-2xl font-bold text-red-600">-</div>
+                <div class="text-xs text-gray-500">Mismatches</div>
+            </div>
+        </div>
+
+        <!-- Only-in badges -->
+        <div class="flex gap-4 mb-6">
+            <span id="stat-only-uploaded" class="badge badge-outline badge-warning">0 only in uploaded</span>
+            <span id="stat-only-stored" class="badge badge-outline badge-info">0 only in stored</span>
+        </div>
+
+        <!-- Mismatch table -->
+        <div id="mismatch-section" class="card-minimal p-6 mb-6 hidden">
+            <div class="flex items-center justify-between mb-4">
+                <h3 class="text-lg font-semibold">Mismatched Rows</h3>
+                <span id="mismatch-count-badge" class="badge badge-error badge-sm">0</span>
+            </div>
+            <p class="text-xs text-gray-500 mb-4">
+                Rows where the timestamp matched but one or more OHLCV values differ.
+                <span class="text-red-600 font-medium">Red cells</span> indicate differing values.
+            </p>
+            <div class="overflow-x-auto max-h-[500px] overflow-y-auto border border-gray-200 rounded-lg">
+                <table class="table table-xs table-zebra w-full" id="mismatch-table">
+                    <thead class="sticky top-0 bg-base-200">
+                        <tr>
+                            <th class="text-xs">Timestamp</th>
+                            <th class="text-xs">Field</th>
+                            <th class="text-xs">Uploaded Value</th>
+                            <th class="text-xs">Stored Value</th>
+                            <th class="text-xs">Difference</th>
+                        </tr>
+                    </thead>
+                    <tbody id="mismatch-tbody"></tbody>
+                </table>
+            </div>
+            <div id="mismatch-truncated" class="mt-2 text-xs text-gray-400 hidden">
+                Showing first 500 mismatches. Download full comparison for complete results.
+            </div>
+        </div>
+
+        <!-- Actions -->
+        <div class="flex gap-4">
+            <button onclick="resetComparison()" class="btn btn-sm btn-outline">
+                New Comparison
+            </button>
+        </div>
+    </div>
+
+    <!-- Loading overlay -->
+    <div id="loading-overlay" class="fixed inset-0 bg-black bg-opacity-30 z-50 hidden flex items-center justify-center">
+        <div class="card-minimal p-8 flex flex-col items-center gap-4">
+            <span class="loading loading-spinner loading-lg text-success"></span>
+            <span id="loading-text" class="text-sm text-gray-600">Comparing data...</span>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// ── Load instruments ──
+async function loadInstruments() {
+    try {
+        const res = await fetch('/api/admin/instruments-list');
+        const instruments = await res.json();
+        const sel = document.getElementById('compare-instrument');
+        sel.innerHTML = '<option value="">Select instrument...</option>';
+        instruments.forEach(function(i) {
+            const opt = document.createElement('option');
+            opt.value = i.instrument_key;
+            opt.textContent = i.symbol || i.instrument_key;
+            sel.appendChild(opt);
+        });
+    } catch (e) {
+        console.error('Failed to load instruments:', e);
+    }
+}
+
+// ── Load expiries for selected instrument ──
+async function loadCompareExpiries() {
+    const instrument = document.getElementById('compare-instrument').value;
+    const sel = document.getElementById('compare-expiry');
+    sel.innerHTML = '<option value="">Select expiry...</option>';
+    if (!instrument) return;
+
+    try {
+        const res = await fetch('/api/analytics/expiry-dates?instrument=' + encodeURIComponent(instrument));
+        const data = await res.json();
+        const expiries = data.expiry_dates || data.dates || data;
+        if (Array.isArray(expiries)) {
+            expiries.forEach(function(e) {
+                const opt = document.createElement('option');
+                opt.value = typeof e === 'string' ? e : e.expiry_date;
+                opt.textContent = opt.value;
+                sel.appendChild(opt);
+            });
+        }
+    } catch (e) {
+        console.error('Failed to load expiries:', e);
+    }
+}
+
+// ── Get column mapping from advanced section ──
+function getCompareMapping() {
+    return {
+        timestamp: document.getElementById('map-timestamp').value.trim() || 'timestamp',
+        open: document.getElementById('map-open').value.trim() || 'open',
+        high: document.getElementById('map-high').value.trim() || 'high',
+        low: document.getElementById('map-low').value.trim() || 'low',
+        close: document.getElementById('map-close').value.trim() || 'close',
+        volume: document.getElementById('map-volume').value.trim() || 'volume',
+        oi: document.getElementById('map-oi').value.trim() || 'oi'
+    };
+}
+
+// ── Submit comparison ──
+document.getElementById('compare-form').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    const errorSpan = document.getElementById('compare-error');
+    errorSpan.classList.add('hidden');
+
+    const fileInput = document.getElementById('compare-file');
+    const instrument = document.getElementById('compare-instrument').value;
+    const expiry = document.getElementById('compare-expiry').value;
+
+    if (!fileInput.files.length) {
+        errorSpan.textContent = 'Please select a reference file.';
+        errorSpan.classList.remove('hidden');
+        return;
+    }
+    if (!instrument) {
+        errorSpan.textContent = 'Please select an instrument.';
+        errorSpan.classList.remove('hidden');
+        return;
+    }
+    if (!expiry) {
+        errorSpan.textContent = 'Please select an expiry date.';
+        errorSpan.classList.remove('hidden');
+        return;
+    }
+
+    const file = fileInput.files[0];
+    if (file.size > 100 * 1024 * 1024) {
+        errorSpan.textContent = 'File is too large. Maximum size is 100 MB.';
+        errorSpan.classList.remove('hidden');
+        return;
+    }
+
+    showLoading('Uploading and comparing data...');
+
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('instrument_key', instrument);
+    formData.append('expiry_date', expiry);
+
+    // Include column mapping
+    const mapping = getCompareMapping();
+    formData.append('column_mapping', JSON.stringify(mapping));
+
+    try {
+        const res = await fetch('/api/admin/compare', {
+            method: 'POST',
+            body: formData
+        });
+        const data = await res.json();
+        hideLoading();
+
+        if (!res.ok) {
+            errorSpan.textContent = data.error || 'Comparison failed.';
+            errorSpan.classList.remove('hidden');
+            return;
+        }
+
+        renderResults(data);
+    } catch (err) {
+        hideLoading();
+        errorSpan.textContent = 'Error: ' + err.message;
+        errorSpan.classList.remove('hidden');
+    }
+});
+
+// ── Render comparison results ──
+function renderResults(data) {
+    const summary = data.summary || {};
+
+    document.getElementById('stat-uploaded').textContent = (summary.uploaded_rows || 0).toLocaleString();
+    document.getElementById('stat-stored').textContent = (summary.stored_rows || 0).toLocaleString();
+    document.getElementById('stat-matched').textContent = (summary.matched_rows || 0).toLocaleString();
+    document.getElementById('stat-identical').textContent = (summary.identical_rows || 0).toLocaleString();
+    document.getElementById('stat-mismatches').textContent = (summary.mismatch_count || 0).toLocaleString();
+
+    document.getElementById('stat-only-uploaded').textContent =
+        (summary.only_in_uploaded || 0).toLocaleString() + ' only in uploaded';
+    document.getElementById('stat-only-stored').textContent =
+        (summary.only_in_stored || 0).toLocaleString() + ' only in stored';
+
+    // Render mismatch table
+    const mismatches = data.mismatches || [];
+    const mismatchSection = document.getElementById('mismatch-section');
+    const tbody = document.getElementById('mismatch-tbody');
+    tbody.innerHTML = '';
+
+    if (mismatches.length > 0) {
+        mismatchSection.classList.remove('hidden');
+        document.getElementById('mismatch-count-badge').textContent = mismatches.length;
+
+        // Limit to 500 rows in the UI
+        const displayMismatches = mismatches.slice(0, 500);
+        displayMismatches.forEach(function(m) {
+            const tr = document.createElement('tr');
+            const diffVal = m.difference != null ? parseFloat(m.difference).toFixed(4) : '-';
+            tr.innerHTML =
+                '<td class="text-xs">' + escapeHtml(m.timestamp || '') + '</td>' +
+                '<td class="text-xs font-medium">' + escapeHtml(m.field || '') + '</td>' +
+                '<td class="text-xs bg-red-50 text-red-700">' + escapeHtml(String(m.uploaded_value != null ? m.uploaded_value : '')) + '</td>' +
+                '<td class="text-xs bg-red-50 text-red-700">' + escapeHtml(String(m.stored_value != null ? m.stored_value : '')) + '</td>' +
+                '<td class="text-xs">' + escapeHtml(String(diffVal)) + '</td>';
+            tbody.appendChild(tr);
+        });
+
+        if (mismatches.length > 500) {
+            document.getElementById('mismatch-truncated').classList.remove('hidden');
+        } else {
+            document.getElementById('mismatch-truncated').classList.add('hidden');
+        }
+    } else {
+        mismatchSection.classList.add('hidden');
+    }
+
+    document.getElementById('step-results').classList.remove('hidden');
+    document.getElementById('step-results').scrollIntoView({behavior: 'smooth'});
+}
+
+// ── Reset ──
+function resetComparison() {
+    document.getElementById('step-results').classList.add('hidden');
+    document.getElementById('mismatch-section').classList.add('hidden');
+    document.getElementById('compare-file').value = '';
+    document.getElementById('compare-error').classList.add('hidden');
+    window.scrollTo({top: 0, behavior: 'smooth'});
+}
+
+// ── Loading helpers ──
+function showLoading(text) {
+    document.getElementById('loading-text').textContent = text || 'Processing...';
+    document.getElementById('loading-overlay').classList.remove('hidden');
+}
+
+function hideLoading() {
+    document.getElementById('loading-overlay').classList.add('hidden');
+}
+
+// Init
+document.addEventListener('DOMContentLoaded', function() {
+    loadInstruments();
+});
+</script>
+{% endblock %}

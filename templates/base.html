@@ -1,13 +1,27 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="light">
+<html lang="en" id="html-root" data-theme="light">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="csrf-token" content="{{ csrf_token() }}">
     <title>{% block title %}ExpiryTrack{% endblock %}</title>
 
     <!-- TailwindCSS & DaisyUI -->
     <link href="https://cdn.jsdelivr.net/npm/daisyui@4.4.24/dist/full.min.css" rel="stylesheet" type="text/css" />
     <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- htmx for progressive enhancement -->
+    <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+    <script src="https://unpkg.com/htmx-ext-sse@2.2.2/sse.js"></script>
+
+    <!-- Apply theme before paint to prevent FOUC -->
+    <script>
+        (function() {
+            var theme = localStorage.getItem('theme') || 'light';
+            document.documentElement.setAttribute('data-theme', theme);
+            if (theme === 'dark') document.documentElement.classList.add('dark-mode');
+        })();
+    </script>
 
     <!-- Custom Styles - Supabase Inspired -->
     <style>
@@ -87,6 +101,165 @@
             background: #ecfdf5;
             color: #059669;
         }
+
+        /* ── Dark Mode Overrides ── */
+        [data-theme="dark"] body {
+            background-color: #1a1a2e;
+            color: #e2e8f0;
+        }
+
+        [data-theme="dark"] .navbar-supabase {
+            background: #16213e;
+            border-bottom-color: #2d3748;
+        }
+
+        [data-theme="dark"] .nav-link {
+            color: #cbd5e0;
+        }
+
+        [data-theme="dark"] .nav-link:hover {
+            background: #2d3748;
+            color: #3ecf8e;
+        }
+
+        [data-theme="dark"] .nav-link.active {
+            background: #1a3a2a;
+            color: #3ecf8e;
+        }
+
+        [data-theme="dark"] .card-minimal {
+            background: #16213e;
+            border-color: #2d3748;
+            box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.3);
+        }
+
+        [data-theme="dark"] .card-minimal:hover {
+            box-shadow: 0 4px 12px 0 rgba(0, 0, 0, 0.4);
+            border-color: #3ecf8e;
+        }
+
+        [data-theme="dark"] .btn-supabase {
+            background: #3ecf8e;
+            color: #1a1a2e;
+        }
+
+        [data-theme="dark"] .btn-supabase:hover {
+            background: #2bb77a;
+        }
+
+        [data-theme="dark"] .supabase-text-gradient {
+            background: linear-gradient(135deg, #3ecf8e 0%, #6ee7b7 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        [data-theme="dark"] footer {
+            background: #16213e !important;
+            border-color: #2d3748 !important;
+        }
+
+        [data-theme="dark"] footer a,
+        [data-theme="dark"] footer p,
+        [data-theme="dark"] footer .text-gray-600,
+        [data-theme="dark"] footer .text-gray-500 {
+            color: #a0aec0 !important;
+        }
+
+        [data-theme="dark"] footer .card-minimal {
+            background: #1a2744 !important;
+            border-color: #2d3748 !important;
+        }
+
+        /* Dark mode text color fixes */
+        [data-theme="dark"] .text-gray-900,
+        [data-theme="dark"] .text-gray-800,
+        [data-theme="dark"] .text-gray-700 {
+            color: #e2e8f0 !important;
+        }
+
+        [data-theme="dark"] .text-gray-600,
+        [data-theme="dark"] .text-gray-500 {
+            color: #a0aec0 !important;
+        }
+
+        [data-theme="dark"] .text-gray-400 {
+            color: #718096 !important;
+        }
+
+        [data-theme="dark"] .bg-gray-50,
+        [data-theme="dark"] .bg-gray-100 {
+            background-color: #1a2744 !important;
+        }
+
+        [data-theme="dark"] .border-gray-200,
+        [data-theme="dark"] .border-gray-300 {
+            border-color: #2d3748 !important;
+        }
+
+        [data-theme="dark"] .hover\:bg-gray-50:hover {
+            background-color: #1a2744 !important;
+        }
+
+        [data-theme="dark"] input,
+        [data-theme="dark"] select,
+        [data-theme="dark"] textarea {
+            background-color: #1a2744 !important;
+            border-color: #2d3748 !important;
+            color: #e2e8f0 !important;
+        }
+
+        /* Toast container styles */
+        #toast-container .toast-item {
+            animation: slideIn 0.3s ease-out;
+        }
+        @keyframes slideIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+        @keyframes slideOut {
+            from { transform: translateX(0); opacity: 1; }
+            to { transform: translateX(100%); opacity: 0; }
+        }
+
+        /* Command palette styles */
+        .cmd-palette-backdrop {
+            background: rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(4px);
+        }
+        .cmd-palette-item {
+            padding: 10px 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            transition: background 0.15s ease;
+        }
+        .cmd-palette-item:hover,
+        .cmd-palette-item.active {
+            background: #ecfdf5;
+        }
+        [data-theme="dark"] .cmd-palette-item:hover,
+        [data-theme="dark"] .cmd-palette-item.active {
+            background: #1a3a2a;
+        }
+        .cmd-palette-item .cmd-shortcut {
+            margin-left: auto;
+            font-size: 0.75rem;
+            color: #9ca3af;
+            font-family: monospace;
+        }
+
+        /* Breadcrumb styles */
+        .breadcrumbs-bar {
+            border-bottom: 1px solid #e5e7eb;
+            background: #f9fafb;
+        }
+        [data-theme="dark"] .breadcrumbs-bar {
+            background: #16213e;
+            border-bottom-color: #2d3748;
+        }
     </style>
 </head>
 <body class="min-h-screen" style="background-color: #fafafa;">
@@ -94,39 +267,168 @@
     <nav class="navbar-supabase sticky top-0 z-50">
         <div class="container mx-auto px-4">
             <div class="flex items-center justify-between h-16">
+                <!-- Logo -->
                 <div class="flex items-center">
                     <a href="{{ url_for('index') }}" class="text-2xl font-bold supabase-text-gradient">
                         ExpiryTrack
                     </a>
                 </div>
-                <div class="flex items-center space-x-2">
-                    <a href="{{ url_for('index') }}" class="nav-link">
-                        Home
-                    </a>
-                    <a href="{{ url_for('collect_page') }}" class="nav-link">
-                        Collect Data
-                    </a>
-                    <a href="{{ url_for('export_wizard') }}" class="nav-link">
-                        Export Data
-                    </a>
-                    <a href="{{ url_for('settings') }}" class="nav-link">
-                        Settings
-                    </a>
-                    <a href="{{ url_for('help_page') }}" class="nav-link">
-                        Help
-                    </a>
+
+                <!-- Desktop Nav -->
+                <div class="hidden md:flex items-center space-x-1">
+                    <!-- Primary Links -->
+                    <a href="{{ url_for('index') }}" class="nav-link">Home</a>
                     {% if is_authenticated %}
-                    <a href="{{ url_for('status_page') }}" class="nav-link">
-                        Status
-                    </a>
-                    <a href="{{ url_for('logout') }}" class="nav-link text-red-600 hover:bg-red-50 hover:text-red-700 font-medium">
-                        Logout
+                    <a href="{{ url_for('instruments.instruments_page') }}" class="nav-link">Instruments</a>
+                    {% endif %}
+                    <a href="{{ url_for('collect.collect_page') }}" class="nav-link">Collect</a>
+                    <a href="{{ url_for('export.export_wizard') }}" class="nav-link">Export</a>
+
+                    {% if is_authenticated %}
+                    <!-- "More" Dropdown -->
+                    <div class="dropdown dropdown-end">
+                        <label tabindex="0" class="nav-link cursor-pointer flex items-center gap-1">
+                            More
+                            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+                        </label>
+                        <ul tabindex="0" class="dropdown-content z-[51] menu p-2 shadow-lg bg-base-100 border border-base-300 rounded-lg w-48 mt-2">
+                            <li><a href="{{ url_for('analytics.analytics_page') }}">Analytics</a></li>
+                            <li><a href="{{ url_for('analytics.option_chain_page') }}">Option Chain</a></li>
+                            <li><a href="{{ url_for('analytics.oi_analysis_page') }}">OI Analysis</a></li>
+                            <li><a href="{{ url_for('analytics.chart_viewer_page') }}">Charts</a></li>
+                            <li><a href="{{ url_for('analytics.expiry_comparison_page') }}">Expiry Comparison</a></li>
+                            <li><a href="{{ url_for('analytics.calendar_page') }}">Calendar</a></li>
+                            <li><a href="{{ url_for('backtest.backtest_page') }}">Backtest</a></li>
+                            <li><a href="{{ url_for('status.download_status_page') }}">Download Status</a></li>
+                            <li><a href="{{ url_for('status.status_page') }}">Status</a></li>
+                            <li class="border-t border-base-200 mt-1 pt-1"></li>
+                            <li><a href="{{ url_for('admin.data_management_page') }}">Data Management</a></li>
+                            <li><a href="{{ url_for('admin.import_page') }}">Import Data</a></li>
+                            <li><a href="{{ url_for('admin.data_comparison_page') }}">Data Comparison</a></li>
+                            <li class="border-t border-base-200 mt-1 pt-1"></li>
+                            <li><a href="{{ url_for('auth.settings') }}">Settings</a></li>
+                            <li><a href="{{ url_for('help_page') }}">Help</a></li>
+                        </ul>
+                    </div>
+                    {% else %}
+                    <a href="{{ url_for('auth.settings') }}" class="nav-link">Settings</a>
+                    <a href="{{ url_for('help_page') }}" class="nav-link">Help</a>
+                    {% endif %}
+                </div>
+
+                <!-- Right Side: Badges + Actions -->
+                <div class="flex items-center space-x-1">
+                    {% if is_authenticated %}
+                    <!-- Token Expiry Badge (#7) -->
+                    <span id="token-badge" class="badge badge-sm badge-success cursor-pointer hidden" title="Token status">Token: --</span>
+
+                    <!-- Collection Progress Badge (#8) -->
+                    <div id="collection-status" class="dropdown dropdown-end hidden">
+                        <div tabindex="0" role="button" class="btn btn-ghost btn-sm gap-1">
+                            <span class="loading loading-spinner loading-xs text-success"></span>
+                            <span id="collection-badge-text" class="text-xs font-medium">0%</span>
+                        </div>
+                        <div tabindex="0" class="dropdown-content z-[51] card card-compact w-72 p-2 shadow-lg bg-base-100 border border-base-300">
+                            <div class="card-body p-3">
+                                <h3 class="font-semibold text-sm">Collection Progress</h3>
+                                <div class="w-full bg-gray-200 rounded-full h-2 mt-1">
+                                    <div id="collection-badge-bar" class="bg-green-500 h-2 rounded-full transition-all" style="width: 0%"></div>
+                                </div>
+                                <div class="flex justify-between text-xs mt-1">
+                                    <span id="collection-badge-candles">0 candles</span>
+                                    <span id="collection-badge-action" class="truncate ml-2 text-right">Idle</span>
+                                </div>
+                                <a href="{{ url_for('status.status_page') }}" class="btn btn-xs btn-outline btn-success mt-2">View Status</a>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Notification Bell (D14) -->
+                    <div class="dropdown dropdown-end" id="notification-bell">
+                        <div tabindex="0" role="button" class="btn btn-ghost btn-sm btn-circle relative" title="Notifications">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                      d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/>
+                            </svg>
+                            <span id="notif-badge" class="absolute -top-1 -right-1 badge badge-xs badge-error hidden">0</span>
+                        </div>
+                        <div tabindex="0" class="dropdown-content z-[51] card card-compact w-80 shadow-lg bg-base-100 border border-base-300 mt-2">
+                            <div class="card-body p-0">
+                                <div class="flex items-center justify-between px-4 py-3 border-b border-base-200">
+                                    <h3 class="font-semibold text-sm">Notifications</h3>
+                                    <button onclick="markAllNotificationsRead()" class="btn btn-ghost btn-xs text-success">Mark all read</button>
+                                </div>
+                                <div id="notif-list" class="max-h-72 overflow-y-auto">
+                                    <div class="px-4 py-6 text-center text-sm text-gray-400">No notifications</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Logout Icon -->
+                    <a href="{{ url_for('auth.logout') }}" class="btn btn-ghost btn-sm btn-circle text-red-500 hover:bg-red-50" title="Logout">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/>
+                        </svg>
                     </a>
                     {% endif %}
+
+                    <!-- Dark Mode Toggle (#5) -->
+                    <button onclick="toggleTheme()" class="btn btn-ghost btn-sm btn-circle" title="Toggle dark mode">
+                        <svg id="theme-icon-light" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/>
+                        </svg>
+                        <svg id="theme-icon-dark" class="w-5 h-5 hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"/>
+                        </svg>
+                    </button>
+
+                    <!-- Mobile Hamburger -->
+                    <div class="dropdown dropdown-end md:hidden">
+                        <label tabindex="0" class="btn btn-ghost btn-sm btn-circle">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/>
+                            </svg>
+                        </label>
+                        <ul tabindex="0" class="dropdown-content z-[51] menu p-2 shadow-lg bg-base-100 border border-base-300 rounded-lg w-52 mt-2">
+                            <li><a href="{{ url_for('index') }}">Home</a></li>
+                            {% if is_authenticated %}
+                            <li><a href="{{ url_for('instruments.instruments_page') }}">Instruments</a></li>
+                            {% endif %}
+                            <li><a href="{{ url_for('collect.collect_page') }}">Collect Data</a></li>
+                            <li><a href="{{ url_for('export.export_wizard') }}">Export Data</a></li>
+                            {% if is_authenticated %}
+                            <li class="border-t border-base-200 mt-1 pt-1"></li>
+                            <li><a href="{{ url_for('analytics.analytics_page') }}">Analytics</a></li>
+                            <li><a href="{{ url_for('analytics.option_chain_page') }}">Option Chain</a></li>
+                            <li><a href="{{ url_for('analytics.oi_analysis_page') }}">OI Analysis</a></li>
+                            <li><a href="{{ url_for('analytics.chart_viewer_page') }}">Charts</a></li>
+                            <li><a href="{{ url_for('analytics.expiry_comparison_page') }}">Expiry Comparison</a></li>
+                            <li><a href="{{ url_for('analytics.calendar_page') }}">Calendar</a></li>
+                            <li><a href="{{ url_for('backtest.backtest_page') }}">Backtest</a></li>
+                            <li><a href="{{ url_for('status.download_status_page') }}">Download Status</a></li>
+                            <li><a href="{{ url_for('status.status_page') }}">Status</a></li>
+                            <li class="border-t border-base-200 mt-1 pt-1"></li>
+                            <li><a href="{{ url_for('admin.data_management_page') }}">Data Management</a></li>
+                            <li><a href="{{ url_for('admin.import_page') }}">Import Data</a></li>
+                            <li><a href="{{ url_for('admin.data_comparison_page') }}">Data Comparison</a></li>
+                            {% endif %}
+                            <li class="border-t border-base-200 mt-1 pt-1"></li>
+                            <li><a href="{{ url_for('auth.settings') }}">Settings</a></li>
+                            <li><a href="{{ url_for('help_page') }}">Help</a></li>
+                            {% if is_authenticated %}
+                            <li class="border-t border-base-200 mt-1 pt-1"></li>
+                            <li><a href="{{ url_for('auth.logout') }}" class="text-red-500">Logout</a></li>
+                            {% endif %}
+                        </ul>
+                    </div>
                 </div>
             </div>
         </div>
     </nav>
+
+    <!-- Toast Container (#6) -->
+    <div id="toast-container" class="fixed top-20 right-4 z-[100] flex flex-col gap-2 max-w-sm"></div>
 
     <!-- Flash Messages -->
     {% with messages = get_flashed_messages(with_categories=true) %}
@@ -139,7 +441,7 @@
                                 {{ message }}
                             </span>
                             <button onclick="this.parentElement.parentElement.remove()" class="text-gray-400 hover:text-gray-600 text-lg font-bold">
-                                ×
+                                &times;
                             </button>
                         </div>
                     </div>
@@ -147,6 +449,46 @@
             </div>
         {% endif %}
     {% endwith %}
+
+    <!-- Breadcrumbs -->
+    {% set breadcrumb_content %}{% block breadcrumbs %}{% endblock %}{% endset %}
+    {% if breadcrumb_content.strip() %}
+    <div class="breadcrumbs-bar">
+        <div class="container mx-auto px-4 py-2">
+            <div class="text-sm breadcrumbs">
+                <ul>
+                    <li><a href="{{ url_for('index') }}" class="text-gray-500 hover:text-green-600">Home</a></li>
+                    {{ breadcrumb_content }}
+                </ul>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Command Palette Modal (D9) -->
+    <div id="cmd-palette" class="fixed inset-0 z-[200] hidden cmd-palette-backdrop" onclick="if(event.target===this)closeCmdPalette()">
+        <div class="container mx-auto px-4 mt-[15vh]">
+            <div class="max-w-lg mx-auto card-minimal overflow-hidden shadow-2xl">
+                <div class="p-4 border-b border-gray-200">
+                    <div class="flex items-center gap-3">
+                        <svg class="w-5 h-5 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                        </svg>
+                        <input id="cmd-search" type="text" placeholder="Search pages and actions..." class="w-full bg-transparent border-none outline-none text-base" autocomplete="off" oninput="filterCmdPalette(this.value)">
+                        <kbd class="kbd kbd-sm text-xs shrink-0">Esc</kbd>
+                    </div>
+                </div>
+                <div id="cmd-results" class="max-h-80 overflow-y-auto p-2">
+                    <!-- Items populated by JS -->
+                </div>
+                <div class="p-3 border-t border-gray-200 text-xs text-gray-400 flex items-center gap-4">
+                    <span>Navigate with <kbd class="kbd kbd-xs">Up</kbd> <kbd class="kbd kbd-xs">Down</kbd></span>
+                    <span>Open with <kbd class="kbd kbd-xs">Enter</kbd></span>
+                    <span class="ml-auto">G then key for quick nav</span>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <!-- Main Content -->
     <main class="container mx-auto px-4 py-8">
@@ -175,12 +517,515 @@
                 </div>
 
                 <div class="text-sm text-gray-600">
-                    <p>Copyright © 2025 - <a href="https://marketcalls.in" target="_blank" class="text-green-600 hover:text-green-700 font-medium">Marketcalls</a></p>
+                    <p>Copyright &copy; 2025 - <a href="https://marketcalls.in" target="_blank" class="text-green-600 hover:text-green-700 font-medium">Marketcalls</a></p>
                     <p class="text-xs text-gray-500 mt-1">Open source software built by the community, for the community</p>
                 </div>
             </div>
         </div>
     </footer>
+
+    <!-- Theme Toggle Script (#5) -->
+    <script>
+    function toggleTheme() {
+        var html = document.getElementById('html-root');
+        var current = html.getAttribute('data-theme');
+        var next = current === 'dark' ? 'light' : 'dark';
+        html.setAttribute('data-theme', next);
+        localStorage.setItem('theme', next);
+        updateThemeIcons(next);
+        if (next === 'dark') {
+            html.classList.add('dark-mode');
+            document.body.style.backgroundColor = '#1a1a2e';
+        } else {
+            html.classList.remove('dark-mode');
+            document.body.style.backgroundColor = '#fafafa';
+        }
+    }
+
+    function updateThemeIcons(theme) {
+        var lightIcon = document.getElementById('theme-icon-light');
+        var darkIcon = document.getElementById('theme-icon-dark');
+        if (theme === 'dark') {
+            lightIcon.classList.add('hidden');
+            darkIcon.classList.remove('hidden');
+        } else {
+            lightIcon.classList.remove('hidden');
+            darkIcon.classList.add('hidden');
+        }
+    }
+
+    // Apply on load
+    (function() {
+        var theme = localStorage.getItem('theme') || 'light';
+        updateThemeIcons(theme);
+        if (theme === 'dark') {
+            document.body.style.backgroundColor = '#1a1a2e';
+        }
+    })();
+    </script>
+
+    <!-- Toast Notification System (#6) -->
+    <script>
+    function showToast(message, type, duration) {
+        type = type || 'info';
+        duration = duration || 5000;
+        var container = document.getElementById('toast-container');
+        var alertClass = {
+            success: 'alert-success',
+            error: 'alert-error',
+            warning: 'alert-warning',
+            info: 'alert-info'
+        }[type] || 'alert-info';
+
+        var toast = document.createElement('div');
+        toast.className = 'toast-item alert ' + alertClass + ' shadow-lg text-sm py-2 px-4 flex items-center justify-between gap-2';
+        toast.innerHTML = '<span>' + escapeHtml(message) + '</span>' +
+            '<button onclick="this.parentElement.style.animation=\'slideOut 0.3s ease-in forwards\';setTimeout(function(){this.parentElement.remove()}.bind(this),300)" class="btn btn-ghost btn-xs">&times;</button>';
+        container.appendChild(toast);
+
+        setTimeout(function() {
+            if (toast.parentElement) {
+                toast.style.animation = 'slideOut 0.3s ease-in forwards';
+                setTimeout(function() { toast.remove(); }, 300);
+            }
+        }, duration);
+    }
+
+    function escapeHtml(text) {
+        var div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    function escAttr(s) {
+        if (!s) return '';
+        return String(s).replace(/&/g,'&amp;').replace(/'/g,'&#39;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
+
+    // Global fetch wrapper — auto-includes CSRF token on mutating requests
+    (function() {
+        var _origFetch = window.fetch;
+        window.fetch = function(url, options) {
+            options = options || {};
+            var method = (options.method || 'GET').toUpperCase();
+            if (['POST', 'PUT', 'PATCH', 'DELETE'].indexOf(method) !== -1) {
+                var meta = document.querySelector('meta[name="csrf-token"]');
+                if (meta) {
+                    options.headers = options.headers || {};
+                    // Support both plain objects and Headers instances
+                    if (options.headers instanceof Headers) {
+                        if (!options.headers.has('X-CSRFToken')) {
+                            options.headers.set('X-CSRFToken', meta.getAttribute('content'));
+                        }
+                    } else {
+                        if (!options.headers['X-CSRFToken']) {
+                            options.headers['X-CSRFToken'] = meta.getAttribute('content');
+                        }
+                    }
+                }
+            }
+            return _origFetch.call(this, url, options);
+        };
+    })();
+    </script>
+
+    <!-- SSE Real-Time Updates -->
+    {% if is_authenticated %}
+    <script>
+    (function() {
+        var tokenWarned = {};
+        var evtSource = null;
+        var reconnectDelay = 1000;
+
+        function updateTokenBadge(data) {
+            var badge = document.getElementById('token-badge');
+            if (!badge) return;
+            if (!data.valid) {
+                badge.textContent = 'Token: Expired';
+                badge.className = 'badge badge-sm badge-error cursor-pointer';
+                badge.classList.remove('hidden');
+                return;
+            }
+            badge.classList.remove('hidden');
+            var secs = data.remaining_seconds || 0;
+            var hrs = Math.floor(secs / 3600);
+            var mins = Math.floor((secs % 3600) / 60);
+            badge.textContent = 'Token: ' + hrs + 'h ' + mins + 'm';
+            if (secs > 7200) {
+                badge.className = 'badge badge-sm badge-success cursor-pointer';
+            } else if (secs > 3600) {
+                badge.className = 'badge badge-sm badge-warning cursor-pointer';
+            } else {
+                badge.className = 'badge badge-sm badge-error cursor-pointer';
+            }
+            [1800, 900, 300].forEach(function(threshold) {
+                if (secs <= threshold && secs > threshold - 65 && !tokenWarned[threshold]) {
+                    tokenWarned[threshold] = true;
+                    var label = threshold >= 60 ? Math.floor(threshold/60) + ' minutes' : threshold + ' seconds';
+                    showToast('Token expires in ' + label + '. Re-authenticate soon.', 'warning', 8000);
+                }
+            });
+        }
+
+        function updateCollectionBadge(data) {
+            var wrapper = document.getElementById('collection-status');
+            if (!wrapper) return;
+            var status = data.status || '';
+            if (status === 'completed' || status === 'failed') {
+                wrapper.classList.add('hidden');
+                return;
+            }
+            if (data.task_type !== 'collection') return;
+            wrapper.classList.remove('hidden');
+            document.getElementById('collection-badge-text').textContent = (data.progress || 0) + '%';
+            document.getElementById('collection-badge-bar').style.width = (data.progress || 0) + '%';
+            var candles = (data.stats && data.stats.candles) || 0;
+            document.getElementById('collection-badge-candles').textContent = candles.toLocaleString() + ' candles';
+            document.getElementById('collection-badge-action').textContent = data.current_action || 'Processing...';
+        }
+
+        function connectSSE() {
+            if (evtSource) evtSource.close();
+            evtSource = new EventSource('/api/events');
+
+            evtSource.addEventListener('auth:token_updated', function(e) {
+                try { updateTokenBadge(JSON.parse(e.data)); } catch(err) {}
+            });
+
+            evtSource.addEventListener('task:update', function(e) {
+                try { updateCollectionBadge(JSON.parse(e.data)); } catch(err) {}
+            });
+            evtSource.addEventListener('task:created', function(e) {
+                try { updateCollectionBadge(JSON.parse(e.data)); } catch(err) {}
+            });
+            evtSource.addEventListener('task:completed', function(e) {
+                try { updateCollectionBadge(JSON.parse(e.data)); } catch(err) {}
+            });
+            evtSource.addEventListener('task:failed', function(e) {
+                try { updateCollectionBadge(JSON.parse(e.data)); } catch(err) {}
+            });
+
+            evtSource.onopen = function() { reconnectDelay = 1000; };
+            evtSource.onerror = function() {
+                evtSource.close();
+                setTimeout(connectSSE, reconnectDelay);
+                reconnectDelay = Math.min(reconnectDelay * 2, 30000);
+            };
+
+            // Expose globally so page-specific scripts can add listeners
+            window._sseSource = evtSource;
+        }
+
+        connectSSE();
+
+        // Initial fetch for token status (SSE only pushes on change)
+        fetch('/api/auth/token-status')
+            .then(function(r) { return r.json(); })
+            .then(updateTokenBadge)
+            .catch(function() {});
+        // Refresh token display every 60s as a fallback
+        setInterval(function() {
+            fetch('/api/auth/token-status')
+                .then(function(r) { return r.json(); })
+                .then(updateTokenBadge)
+                .catch(function() {});
+        }, 60000);
+    })();
+    </script>
+
+    <!-- Notification Bell Logic (D14) -->
+    <script>
+    (function() {
+        var NOTIF_ICON_MAP = {
+            collection_complete: { cls: 'text-success', sym: 'C' },
+            collection_failed:  { cls: 'text-error',   sym: '!' },
+            token_expiring:     { cls: 'text-warning',  sym: 'T' },
+            quality_issue:      { cls: 'text-info',     sym: 'Q' }
+        };
+
+        function renderNotifications(notifications) {
+            var list = document.getElementById('notif-list');
+            if (!list) return;
+            if (!notifications || notifications.length === 0) {
+                list.innerHTML = '<div class="px-4 py-6 text-center text-sm text-gray-400">No notifications</div>';
+                return;
+            }
+            var html = '';
+            notifications.forEach(function(n) {
+                var icon = NOTIF_ICON_MAP[n.type] || { cls: 'text-gray-500', sym: 'N' };
+                var readCls = n.read ? 'opacity-60' : '';
+                var dot = n.read ? '' : '<span class="w-2 h-2 rounded-full bg-success shrink-0"></span>';
+                var ago = timeAgo(n.created_at);
+                html += '<div class="flex items-start gap-3 px-4 py-3 hover:bg-base-200 cursor-pointer border-b border-base-200 ' + readCls + '" onclick="markNotificationRead(' + n.id + ', this)">' +
+                    '<span class="w-8 h-8 rounded-full bg-base-200 flex items-center justify-center text-xs font-bold shrink-0 ' + icon.cls + '">' + icon.sym + '</span>' +
+                    '<div class="flex-1 min-w-0">' +
+                        '<div class="text-sm font-medium truncate">' + escapeHtml(n.title) + '</div>' +
+                        (n.message ? '<div class="text-xs text-gray-500 truncate">' + escapeHtml(n.message) + '</div>' : '') +
+                        '<div class="text-xs text-gray-400 mt-0.5">' + ago + '</div>' +
+                    '</div>' +
+                    dot +
+                '</div>';
+            });
+            list.innerHTML = html;
+        }
+
+        function updateBadge(count) {
+            var badge = document.getElementById('notif-badge');
+            if (!badge) return;
+            if (count > 0) {
+                badge.textContent = count > 99 ? '99+' : count;
+                badge.classList.remove('hidden');
+            } else {
+                badge.classList.add('hidden');
+            }
+        }
+
+        function timeAgo(dateStr) {
+            if (!dateStr) return '';
+            var now = new Date();
+            var d = new Date(dateStr);
+            var diff = Math.floor((now - d) / 1000);
+            if (diff < 60) return 'just now';
+            if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+            if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
+            return Math.floor(diff / 86400) + 'd ago';
+        }
+
+        function fetchNotifications() {
+            fetch('/api/notifications')
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    renderNotifications(data.notifications || []);
+                })
+                .catch(function() {});
+
+            fetch('/api/notifications/unread-count')
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    updateBadge(data.count || 0);
+                })
+                .catch(function() {});
+        }
+
+        window.markNotificationRead = function(id, el) {
+            fetch('/api/notifications/mark-read', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id: id })
+            }).then(function() {
+                if (el) el.classList.add('opacity-60');
+                var dot = el && el.querySelector('.bg-success');
+                if (dot) dot.remove();
+                fetchNotifications();
+            }).catch(function() {});
+        };
+
+        window.markAllNotificationsRead = function() {
+            fetch('/api/notifications/mark-read', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ all: true })
+            }).then(function() {
+                fetchNotifications();
+            }).catch(function() {});
+        };
+
+        // Listen for SSE notification events
+        function listenForNotifications() {
+            var checkSSE = setInterval(function() {
+                if (window._sseSource) {
+                    clearInterval(checkSSE);
+                    window._sseSource.addEventListener('notification:new', function() {
+                        fetchNotifications();
+                    });
+                }
+            }, 500);
+        }
+
+        // Initial load
+        fetchNotifications();
+        listenForNotifications();
+
+        // Poll every 60 seconds as fallback
+        setInterval(fetchNotifications, 60000);
+    })();
+    </script>
+    {% endif %}
+
+    <!-- htmx CSRF token configuration -->
+    <script>
+    document.body.addEventListener('htmx:configRequest', function(evt) {
+        var token = document.querySelector('meta[name="csrf-token"]');
+        if (token) evt.detail.headers['X-CSRFToken'] = token.getAttribute('content');
+    });
+    </script>
+
+    <!-- Command Palette & Keyboard Shortcuts (D9) -->
+    <script>
+    (function() {
+        // Command palette items — label, url, shortcut hint, icon
+        var cmdItems = [
+            { label: 'Home',            url: '/',                icon: 'H', shortcut: 'G H' },
+            { label: 'Collect Data',    url: '/collect',         icon: 'C', shortcut: 'G C' },
+            { label: 'Export Data',     url: '/export',          icon: 'E', shortcut: 'G E' },
+            { label: 'Analytics',       url: '/analytics',       icon: 'A', shortcut: 'G A' },
+            { label: 'Download Status', url: '/download-status', icon: 'D', shortcut: '' },
+            { label: 'Status',          url: '/status',          icon: 'S', shortcut: 'G S' },
+            { label: 'Option Chain',    url: '/option-chain',    icon: 'O', shortcut: '' },
+            { label: 'Charts',          url: '/chart',           icon: 'V', shortcut: '' },
+            { label: 'OI Analysis',     url: '/oi-analysis',     icon: 'I', shortcut: '' },
+            { label: 'Calendar',        url: '/calendar',        icon: 'L', shortcut: '' },
+            { label: 'Instruments',     url: '/instruments',     icon: 'N', shortcut: '' },
+            { label: 'Settings',        url: '/settings',        icon: 'G', shortcut: '' },
+            { label: 'Help',            url: '/help',            icon: '?', shortcut: '' }
+        ];
+
+        var activeIdx = 0;
+        var filteredItems = cmdItems.slice();
+
+        function renderCmdResults() {
+            var container = document.getElementById('cmd-results');
+            if (!container) return;
+            container.innerHTML = '';
+            filteredItems.forEach(function(item, i) {
+                var div = document.createElement('div');
+                div.className = 'cmd-palette-item' + (i === activeIdx ? ' active' : '');
+                div.setAttribute('data-index', i);
+                div.innerHTML =
+                    '<span class="w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center text-sm font-bold text-gray-600 shrink-0">' +
+                    escapeHtml(item.icon) + '</span>' +
+                    '<span class="font-medium text-sm">' + escapeHtml(item.label) + '</span>' +
+                    (item.shortcut ? '<span class="cmd-shortcut">' + escapeHtml(item.shortcut) + '</span>' : '');
+                div.onclick = function() { window.location.href = item.url; };
+                div.onmouseenter = function() {
+                    activeIdx = i;
+                    highlightActive();
+                };
+                container.appendChild(div);
+            });
+        }
+
+        function highlightActive() {
+            var items = document.querySelectorAll('#cmd-results .cmd-palette-item');
+            items.forEach(function(el, i) {
+                if (i === activeIdx) {
+                    el.classList.add('active');
+                    el.scrollIntoView({ block: 'nearest' });
+                } else {
+                    el.classList.remove('active');
+                }
+            });
+        }
+
+        window.filterCmdPalette = function(query) {
+            var q = query.toLowerCase().trim();
+            if (!q) {
+                filteredItems = cmdItems.slice();
+            } else {
+                filteredItems = cmdItems.filter(function(item) {
+                    return item.label.toLowerCase().indexOf(q) !== -1;
+                });
+            }
+            activeIdx = 0;
+            renderCmdResults();
+        };
+
+        window.openCmdPalette = function() {
+            var palette = document.getElementById('cmd-palette');
+            var searchInput = document.getElementById('cmd-search');
+            if (!palette) return;
+            palette.classList.remove('hidden');
+            filteredItems = cmdItems.slice();
+            activeIdx = 0;
+            renderCmdResults();
+            searchInput.value = '';
+            setTimeout(function() { searchInput.focus(); }, 50);
+        };
+
+        window.closeCmdPalette = function() {
+            var palette = document.getElementById('cmd-palette');
+            if (palette) palette.classList.add('hidden');
+        };
+
+        // Keyboard navigation inside the palette
+        document.addEventListener('keydown', function(e) {
+            var palette = document.getElementById('cmd-palette');
+            var isOpen = palette && !palette.classList.contains('hidden');
+
+            if (isOpen) {
+                if (e.key === 'Escape') {
+                    e.preventDefault();
+                    closeCmdPalette();
+                    return;
+                }
+                if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    activeIdx = (activeIdx + 1) % filteredItems.length;
+                    highlightActive();
+                    return;
+                }
+                if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    activeIdx = (activeIdx - 1 + filteredItems.length) % filteredItems.length;
+                    highlightActive();
+                    return;
+                }
+                if (e.key === 'Enter' && filteredItems.length > 0) {
+                    e.preventDefault();
+                    window.location.href = filteredItems[activeIdx].url;
+                    return;
+                }
+                // Let other keys pass through to the search input
+                return;
+            }
+        });
+
+        // Global shortcuts: Ctrl+K / Cmd+K and G-then-key sequences
+        var gPending = false;
+        var gTimer = null;
+
+        document.addEventListener('keydown', function(e) {
+            var palette = document.getElementById('cmd-palette');
+            var isOpen = palette && !palette.classList.contains('hidden');
+            if (isOpen) return; // Handled above
+
+            // Skip if user is in an input, textarea, select, or contenteditable
+            var tag = (e.target.tagName || '').toLowerCase();
+            if (tag === 'input' || tag === 'textarea' || tag === 'select' || e.target.isContentEditable) return;
+
+            // Ctrl+K / Cmd+K — open command palette
+            if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+                e.preventDefault();
+                openCmdPalette();
+                return;
+            }
+
+            // G-then-key navigation
+            if (gPending) {
+                gPending = false;
+                clearTimeout(gTimer);
+                var routes = {
+                    'h': '/',
+                    'c': '/collect',
+                    'e': '/export',
+                    'a': '/analytics',
+                    's': '/status'
+                };
+                var key = e.key.toLowerCase();
+                if (routes[key]) {
+                    e.preventDefault();
+                    window.location.href = routes[key];
+                }
+                return;
+            }
+
+            if (e.key === 'g' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+                gPending = true;
+                gTimer = setTimeout(function() { gPending = false; }, 800);
+            }
+        });
+    })();
+    </script>
 
     {% block scripts %}{% endblock %}
 </body>

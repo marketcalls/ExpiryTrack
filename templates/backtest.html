@@ -1,0 +1,706 @@
+{% extends "base.html" %}
+
+{% block title %}Backtest - ExpiryTrack{% endblock %}
+
+{% block breadcrumbs %}<li class="text-gray-700 font-medium">Backtest</li>{% endblock %}
+
+{% block content %}
+<div class="max-w-7xl mx-auto">
+    <div class="flex items-center justify-between mb-6">
+        <h1 class="text-3xl font-bold supabase-text-gradient">Strategy Backtester</h1>
+        <div class="flex gap-2">
+            <button onclick="seedPresets()" class="btn btn-sm btn-outline">Load Presets</button>
+        </div>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <!-- Left: Strategy Editor -->
+        <div class="space-y-4">
+            <!-- Strategy Selector -->
+            <div class="card-minimal p-4">
+                <div class="flex items-center gap-3 mb-3">
+                    <select id="strategy-select" class="select select-bordered select-sm flex-1" onchange="loadStrategy()">
+                        <option value="">-- New Strategy --</option>
+                    </select>
+                    <button onclick="deleteStrategy()" class="btn btn-sm btn-ghost btn-square text-error" title="Delete strategy">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                    </button>
+                </div>
+                <div class="flex gap-2">
+                    <input id="strategy-name" type="text" placeholder="Strategy name" class="input input-bordered input-sm flex-1">
+                    <input id="strategy-desc" type="text" placeholder="Description (optional)" class="input input-bordered input-sm flex-1">
+                </div>
+            </div>
+
+            <!-- Code Editor -->
+            <div class="card-minimal overflow-hidden">
+                <div class="flex items-center justify-between px-4 py-2 bg-base-200 border-b border-base-300">
+                    <span class="text-sm font-medium">Strategy Code</span>
+                    <div class="flex gap-2">
+                        <button onclick="validateCode()" class="btn btn-xs btn-ghost">Validate</button>
+                        <button onclick="saveStrategy()" class="btn btn-xs btn-primary">Save</button>
+                    </div>
+                </div>
+                <textarea id="code-editor" class="w-full font-mono text-sm p-4 bg-base-100 border-0 focus:outline-none" rows="22" spellcheck="false" style="tab-size: 4; resize: vertical;">class MyStrategy(Strategy):
+    def on_init(self):
+        self.closes = []
+        self.fast = 10
+        self.slow = 30
+
+    def on_candle(self, timestamp, open, high, low, close, volume, oi):
+        self.closes.append(close)
+        if len(self.closes) < self.slow:
+            return
+
+        fast_sma = sum(self.closes[-self.fast:]) / self.fast
+        slow_sma = sum(self.closes[-self.slow:]) / self.slow
+
+        if fast_sma > slow_sma and self.position <= 0:
+            if self.position < 0:
+                self.cover(abs(self.position))
+            self.buy(1)
+        elif fast_sma < slow_sma and self.position > 0:
+            self.sell(self.position)
+</textarea>
+                <div id="code-status" class="px-4 py-1 text-xs bg-base-200 border-t border-base-300 hidden"></div>
+            </div>
+        </div>
+
+        <!-- Right: Config + Results -->
+        <div class="space-y-4">
+            <!-- Config Panel -->
+            <div class="card-minimal p-4">
+                <h3 class="font-semibold mb-3">Backtest Configuration</h3>
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="label label-text text-xs">Data Source</label>
+                        <select id="cfg-source" class="select select-bordered select-sm w-full" onchange="loadInstruments()">
+                            <option value="candle_data">Candle Data (Equity/Index)</option>
+                            <option value="historical_data">Historical Data (F&O)</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="label label-text text-xs">Instrument</label>
+                        <select id="cfg-instrument" class="select select-bordered select-sm w-full" onchange="onInstrumentChange()">
+                            <option value="">Loading...</option>
+                        </select>
+                    </div>
+                    <div id="fo-expiry-wrap" class="hidden">
+                        <label class="label label-text text-xs">Expiry Date</label>
+                        <select id="cfg-fo-expiry" class="select select-bordered select-sm w-full" onchange="loadFoContracts()">
+                            <option value="">Select expiry...</option>
+                        </select>
+                    </div>
+                    <div id="fo-contract-wrap" class="col-span-2 hidden">
+                        <label class="label label-text text-xs">Contract</label>
+                        <select id="cfg-fo-contract" class="select select-bordered select-sm w-full">
+                            <option value="">Select contract...</option>
+                        </select>
+                    </div>
+                    <div id="interval-wrap">
+                        <label class="label label-text text-xs">Interval</label>
+                        <select id="cfg-interval" class="select select-bordered select-sm w-full">
+                            <option value="1day">1 Day</option>
+                            <option value="30minute">30 Min</option>
+                            <option value="15minute">15 Min</option>
+                            <option value="5minute">5 Min</option>
+                            <option value="1minute">1 Min</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="label label-text text-xs">Initial Capital</label>
+                        <input id="cfg-capital" type="number" value="100000" class="input input-bordered input-sm w-full">
+                    </div>
+                    <div>
+                        <label class="label label-text text-xs">From Date</label>
+                        <input id="cfg-from" type="date" class="input input-bordered input-sm w-full">
+                    </div>
+                    <div>
+                        <label class="label label-text text-xs">To Date</label>
+                        <input id="cfg-to" type="date" class="input input-bordered input-sm w-full">
+                    </div>
+                </div>
+                <div class="mt-4">
+                    <button id="btn-run" onclick="runBacktest()" class="btn btn-primary btn-sm w-full">
+                        Run Backtest
+                    </button>
+                </div>
+            </div>
+
+            <!-- Progress -->
+            <div id="progress-panel" class="card-minimal p-4 hidden">
+                <div class="flex items-center gap-3 mb-2">
+                    <span class="loading loading-spinner loading-sm"></span>
+                    <span id="progress-msg" class="text-sm">Starting...</span>
+                </div>
+                <progress id="progress-bar" class="progress progress-primary w-full" value="0" max="100"></progress>
+            </div>
+
+            <!-- Metrics Cards -->
+            <div id="metrics-panel" class="hidden">
+                <div class="grid grid-cols-3 gap-3">
+                    <div class="card-minimal p-3 text-center">
+                        <div id="m-return" class="text-lg font-bold">-</div>
+                        <div class="text-xs text-gray-500">Return %</div>
+                    </div>
+                    <div class="card-minimal p-3 text-center">
+                        <div id="m-pnl" class="text-lg font-bold">-</div>
+                        <div class="text-xs text-gray-500">Total P&L</div>
+                    </div>
+                    <div class="card-minimal p-3 text-center">
+                        <div id="m-trades" class="text-lg font-bold">-</div>
+                        <div class="text-xs text-gray-500">Total Trades</div>
+                    </div>
+                    <div class="card-minimal p-3 text-center">
+                        <div id="m-winrate" class="text-lg font-bold">-</div>
+                        <div class="text-xs text-gray-500">Win Rate %</div>
+                    </div>
+                    <div class="card-minimal p-3 text-center">
+                        <div id="m-sharpe" class="text-lg font-bold">-</div>
+                        <div class="text-xs text-gray-500">Sharpe Ratio</div>
+                    </div>
+                    <div class="card-minimal p-3 text-center">
+                        <div id="m-drawdown" class="text-lg font-bold">-</div>
+                        <div class="text-xs text-gray-500">Max Drawdown %</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Equity Curve Chart -->
+            <div id="chart-panel" class="card-minimal p-4 hidden">
+                <h3 class="font-semibold mb-2">Equity Curve</h3>
+                <canvas id="equity-chart" height="200"></canvas>
+            </div>
+
+            <!-- Trade Log -->
+            <div id="trades-panel" class="card-minimal p-4 hidden">
+                <div class="flex items-center justify-between mb-2">
+                    <h3 class="font-semibold">Trade Log</h3>
+                    <span id="trade-count" class="badge badge-sm">0 trades</span>
+                </div>
+                <div class="overflow-x-auto max-h-64 overflow-y-auto">
+                    <table class="table table-xs table-zebra">
+                        <thead class="sticky top-0 bg-base-100">
+                            <tr>
+                                <th>#</th>
+                                <th>Side</th>
+                                <th>Qty</th>
+                                <th>Entry</th>
+                                <th>Exit</th>
+                                <th>P&L</th>
+                                <th>Entry Time</th>
+                            </tr>
+                        </thead>
+                        <tbody id="trade-log"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Result History -->
+            <div class="card-minimal p-4">
+                <div class="flex items-center justify-between mb-2">
+                    <h3 class="font-semibold">Recent Results</h3>
+                    <button onclick="loadResults()" class="btn btn-xs btn-ghost">Refresh</button>
+                </div>
+                <div id="result-history" class="space-y-1 max-h-48 overflow-y-auto">
+                    <div class="text-sm text-gray-400">No results yet</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script>
+const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
+let equityChart = null;
+let currentStrategyId = null;
+let pollTimer = null;
+
+// ── Init ──
+document.addEventListener('DOMContentLoaded', () => {
+    loadStrategies();
+    loadInstruments();
+    loadResults();
+});
+
+function apiHeaders() {
+    return { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken };
+}
+
+// ── Strategies ──
+async function loadStrategies() {
+    try {
+        const res = await fetch('/api/backtest/strategies', { headers: apiHeaders() });
+        const data = await res.json();
+        const sel = document.getElementById('strategy-select');
+        sel.innerHTML = '<option value="">-- New Strategy --</option>';
+        data.forEach(s => {
+            const opt = document.createElement('option');
+            opt.value = s.id;
+            opt.textContent = s.name + (s.is_preset ? ' (preset)' : '');
+            sel.appendChild(opt);
+        });
+        if (currentStrategyId) sel.value = currentStrategyId;
+    } catch (e) { console.error('Failed to load strategies:', e); }
+}
+
+function loadStrategy() {
+    const sel = document.getElementById('strategy-select');
+    const id = sel.value;
+    if (!id) {
+        currentStrategyId = null;
+        document.getElementById('strategy-name').value = '';
+        document.getElementById('strategy-desc').value = '';
+        return;
+    }
+    fetch(`/api/backtest/strategies/${id}`, { headers: apiHeaders() })
+        .then(r => r.json())
+        .then(s => {
+            currentStrategyId = s.id;
+            document.getElementById('strategy-name').value = s.name;
+            document.getElementById('strategy-desc').value = s.description || '';
+            document.getElementById('code-editor').value = s.code;
+        });
+}
+
+async function saveStrategy() {
+    const name = document.getElementById('strategy-name').value.trim();
+    const code = document.getElementById('code-editor').value.trim();
+    if (!name) return showCodeStatus('Please enter a strategy name', 'error');
+    if (!code) return showCodeStatus('Please enter strategy code', 'error');
+
+    const body = {
+        name,
+        code,
+        description: document.getElementById('strategy-desc').value.trim(),
+        id: currentStrategyId,
+    };
+    const res = await fetch('/api/backtest/strategies', {
+        method: 'POST', headers: apiHeaders(), body: JSON.stringify(body)
+    });
+    const data = await res.json();
+    if (data.error) return showCodeStatus(data.error, 'error');
+    currentStrategyId = data.id;
+    showCodeStatus('Strategy saved!', 'success');
+    loadStrategies();
+}
+
+async function deleteStrategy() {
+    if (!currentStrategyId) return;
+    if (!confirm('Delete this strategy and all its results?')) return;
+    await fetch(`/api/backtest/strategies/${currentStrategyId}`, {
+        method: 'DELETE', headers: apiHeaders()
+    });
+    currentStrategyId = null;
+    document.getElementById('strategy-select').value = '';
+    document.getElementById('strategy-name').value = '';
+    document.getElementById('strategy-desc').value = '';
+    loadStrategies();
+}
+
+// ── Validate ──
+async function validateCode() {
+    const code = document.getElementById('code-editor').value.trim();
+    if (!code) return showCodeStatus('No code to validate', 'error');
+    const res = await fetch('/api/backtest/strategies/validate', {
+        method: 'POST', headers: apiHeaders(), body: JSON.stringify({ code })
+    });
+    const data = await res.json();
+    if (data.valid) showCodeStatus('Valid strategy code!', 'success');
+    else showCodeStatus(data.errors.join('; '), 'error');
+}
+
+function showCodeStatus(msg, type) {
+    const el = document.getElementById('code-status');
+    el.textContent = msg;
+    el.className = `px-4 py-1 text-xs border-t border-base-300 ${type === 'error' ? 'bg-error/10 text-error' : 'bg-success/10 text-success'}`;
+    el.classList.remove('hidden');
+    setTimeout(() => el.classList.add('hidden'), 5000);
+}
+
+// ── Presets ──
+async function seedPresets() {
+    const res = await fetch('/api/backtest/seed-presets', {
+        method: 'POST', headers: apiHeaders()
+    });
+    const data = await res.json();
+    showCodeStatus(data.message, 'success');
+    loadStrategies();
+}
+
+// ── Instruments ──
+async function loadInstruments() {
+    const source = document.getElementById('cfg-source').value;
+    const sel = document.getElementById('cfg-instrument');
+    const isFO = source === 'historical_data';
+
+    // Toggle F&O selectors vs interval
+    document.getElementById('fo-expiry-wrap').classList.toggle('hidden', !isFO);
+    document.getElementById('fo-contract-wrap').classList.toggle('hidden', !isFO);
+    document.getElementById('interval-wrap').classList.toggle('hidden', isFO);
+
+    // Reset F&O selectors
+    document.getElementById('cfg-fo-expiry').innerHTML = '<option value="">Select expiry...</option>';
+    document.getElementById('cfg-fo-contract').innerHTML = '<option value="">Select contract...</option>';
+
+    sel.innerHTML = '<option value="">Loading...</option>';
+    try {
+        const res = await fetch(`/api/backtest/instruments?data_source=${source}`, {
+            headers: apiHeaders()
+        });
+        const data = await res.json();
+        sel.innerHTML = '';
+        if (!data.length) {
+            sel.innerHTML = '<option value="">No instruments with data</option>';
+            return;
+        }
+        data.forEach(inst => {
+            const opt = document.createElement('option');
+            opt.value = inst.instrument_key;
+            if (isFO) {
+                const expiries = inst.expiry_count || 0;
+                const contracts = inst.contract_count || 0;
+                opt.textContent = `${inst.display_name} (${expiries} expiries, ${contracts.toLocaleString()} contracts)`;
+            } else {
+                opt.textContent = `${inst.display_name} (${inst.bar_count.toLocaleString()} bars)`;
+            }
+            sel.appendChild(opt);
+        });
+    } catch (e) {
+        sel.innerHTML = '<option value="">Error loading instruments</option>';
+    }
+}
+
+function onInstrumentChange() {
+    const source = document.getElementById('cfg-source').value;
+    if (source === 'historical_data') {
+        loadFoExpiries();
+    }
+}
+
+async function loadFoExpiries() {
+    const instrumentKey = document.getElementById('cfg-instrument').value;
+    const sel = document.getElementById('cfg-fo-expiry');
+    const contractSel = document.getElementById('cfg-fo-contract');
+    contractSel.innerHTML = '<option value="">Select contract...</option>';
+
+    if (!instrumentKey) {
+        sel.innerHTML = '<option value="">Select underlying first</option>';
+        return;
+    }
+
+    sel.innerHTML = '<option value="">Loading expiries...</option>';
+    try {
+        const res = await fetch(`/api/backtest/fo/expiries?instrument_key=${encodeURIComponent(instrumentKey)}`, {
+            headers: apiHeaders()
+        });
+        const data = await res.json();
+        sel.innerHTML = '';
+        if (!data.length) {
+            sel.innerHTML = '<option value="">No expiries found</option>';
+            return;
+        }
+        data.forEach(exp => {
+            const opt = document.createElement('option');
+            opt.value = exp.expiry_date;
+            const d = new Date(exp.expiry_date);
+            const label = d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+            opt.textContent = `${label} (${exp.contract_count} contracts, ${exp.bar_count.toLocaleString()} bars)`;
+            sel.appendChild(opt);
+        });
+    } catch (e) {
+        sel.innerHTML = '<option value="">Error loading expiries</option>';
+    }
+}
+
+async function loadFoContracts() {
+    const instrumentKey = document.getElementById('cfg-instrument').value;
+    const expiryDate = document.getElementById('cfg-fo-expiry').value;
+    const sel = document.getElementById('cfg-fo-contract');
+
+    if (!instrumentKey || !expiryDate) {
+        sel.innerHTML = '<option value="">Select expiry first</option>';
+        return;
+    }
+
+    sel.innerHTML = '<option value="">Loading contracts...</option>';
+    try {
+        const res = await fetch(`/api/backtest/fo/contracts?instrument_key=${encodeURIComponent(instrumentKey)}&expiry_date=${encodeURIComponent(expiryDate)}`, {
+            headers: apiHeaders()
+        });
+        const data = await res.json();
+        sel.innerHTML = '';
+        if (!data.length) {
+            sel.innerHTML = '<option value="">No contracts found</option>';
+            return;
+        }
+
+        // Group by contract_type
+        const groups = {};
+        data.forEach(c => {
+            const type = c.contract_type || 'Other';
+            if (!groups[type]) groups[type] = [];
+            groups[type].push(c);
+        });
+
+        const typeLabels = { 'FUT': 'Futures', 'CE': 'Call Options', 'PE': 'Put Options' };
+        for (const [type, contracts] of Object.entries(groups)) {
+            const optgroup = document.createElement('optgroup');
+            optgroup.label = typeLabels[type] || type;
+            contracts.forEach(c => {
+                const opt = document.createElement('option');
+                opt.value = c.expired_instrument_key;
+                opt.dataset.firstDate = c.first_date || '';
+                opt.dataset.lastDate = c.last_date || '';
+                const strike = c.strike_price ? ` @ ${c.strike_price}` : '';
+                opt.textContent = `${c.trading_symbol || c.expired_instrument_key}${strike} (${c.bar_count.toLocaleString()} bars)`;
+                optgroup.appendChild(opt);
+            });
+            sel.appendChild(optgroup);
+        }
+
+        // Auto-fill date range from first selected contract
+        autoFillDateRange();
+        sel.addEventListener('change', autoFillDateRange);
+    } catch (e) {
+        sel.innerHTML = '<option value="">Error loading contracts</option>';
+    }
+}
+
+function autoFillDateRange() {
+    const sel = document.getElementById('cfg-fo-contract');
+    const selected = sel.selectedOptions[0];
+    if (selected && selected.dataset.firstDate) {
+        document.getElementById('cfg-from').value = selected.dataset.firstDate.slice(0, 10);
+        document.getElementById('cfg-to').value = selected.dataset.lastDate.slice(0, 10);
+    }
+}
+
+// ── Run Backtest ──
+async function runBacktest() {
+    const code = document.getElementById('code-editor').value.trim();
+    const source = document.getElementById('cfg-source').value;
+    const isFO = source === 'historical_data';
+
+    let instrument;
+    if (isFO) {
+        instrument = document.getElementById('cfg-fo-contract').value;
+        if (!instrument) return showCodeStatus('Select a contract to backtest', 'error');
+    } else {
+        instrument = document.getElementById('cfg-instrument').value;
+    }
+    if (!code || !instrument) return showCodeStatus('Select instrument and write code', 'error');
+
+    const body = {
+        code,
+        instrument_key: instrument,
+        data_source: source,
+        interval: document.getElementById('cfg-interval').value,
+        from_date: document.getElementById('cfg-from').value || null,
+        to_date: document.getElementById('cfg-to').value || null,
+        initial_capital: parseFloat(document.getElementById('cfg-capital').value) || 100000,
+        strategy_id: currentStrategyId,
+    };
+
+    document.getElementById('btn-run').disabled = true;
+    document.getElementById('btn-run').textContent = 'Running...';
+    document.getElementById('progress-panel').classList.remove('hidden');
+    document.getElementById('metrics-panel').classList.add('hidden');
+    document.getElementById('chart-panel').classList.add('hidden');
+    document.getElementById('trades-panel').classList.add('hidden');
+
+    try {
+        const res = await fetch('/api/backtest/run', {
+            method: 'POST', headers: apiHeaders(), body: JSON.stringify(body)
+        });
+        const data = await res.json();
+        if (data.error) {
+            showCodeStatus(data.error, 'error');
+            resetRunBtn();
+            return;
+        }
+        pollStatus(data.task_id, data.result_id);
+    } catch (e) {
+        showCodeStatus('Failed to start backtest', 'error');
+        resetRunBtn();
+    }
+}
+
+function pollStatus(taskId, resultId) {
+    if (pollTimer) clearInterval(pollTimer);
+    pollTimer = setInterval(async () => {
+        try {
+            const res = await fetch(`/api/backtest/status/${taskId}`, { headers: apiHeaders() });
+            const data = await res.json();
+            document.getElementById('progress-msg').textContent = data.status_message || 'Processing...';
+            document.getElementById('progress-bar').value = data.progress || 0;
+
+            if (data.status === 'completed') {
+                clearInterval(pollTimer);
+                pollTimer = null;
+                document.getElementById('progress-panel').classList.add('hidden');
+                resetRunBtn();
+                loadResult(resultId);
+                loadResults();
+            } else if (data.status === 'failed') {
+                clearInterval(pollTimer);
+                pollTimer = null;
+                document.getElementById('progress-panel').classList.add('hidden');
+                showCodeStatus(data.error || 'Backtest failed', 'error');
+                resetRunBtn();
+            }
+        } catch (e) {
+            clearInterval(pollTimer);
+            pollTimer = null;
+            resetRunBtn();
+        }
+    }, 800);
+}
+
+function resetRunBtn() {
+    document.getElementById('btn-run').disabled = false;
+    document.getElementById('btn-run').textContent = 'Run Backtest';
+}
+
+// ── Display Results ──
+async function loadResult(resultId) {
+    const res = await fetch(`/api/backtest/results/${resultId}`, { headers: apiHeaders() });
+    const data = await res.json();
+    if (data.error) return;
+    displayResult(data);
+}
+
+function displayResult(data) {
+    const m = data.metrics || {};
+
+    // Metrics cards
+    document.getElementById('m-return').textContent = (m.total_return_pct || 0) + '%';
+    document.getElementById('m-return').className = `text-lg font-bold ${m.total_return_pct >= 0 ? 'text-success' : 'text-error'}`;
+    document.getElementById('m-pnl').textContent = formatCurrency(m.total_pnl || 0);
+    document.getElementById('m-pnl').className = `text-lg font-bold ${m.total_pnl >= 0 ? 'text-success' : 'text-error'}`;
+    document.getElementById('m-trades').textContent = m.total_trades || 0;
+    document.getElementById('m-winrate').textContent = (m.win_rate || 0) + '%';
+    document.getElementById('m-sharpe').textContent = m.sharpe_ratio || 0;
+    document.getElementById('m-drawdown').textContent = (m.max_drawdown_pct || 0) + '%';
+    document.getElementById('metrics-panel').classList.remove('hidden');
+
+    // Equity curve
+    if (data.equity_curve && data.equity_curve.length) {
+        renderEquityChart(data.equity_curve);
+        document.getElementById('chart-panel').classList.remove('hidden');
+    }
+
+    // Trade log
+    if (data.trades && data.trades.length) {
+        const tbody = document.getElementById('trade-log');
+        tbody.innerHTML = '';
+        data.trades.forEach((t, i) => {
+            const pnlClass = t.pnl >= 0 ? 'text-success' : 'text-error';
+            tbody.innerHTML += `<tr>
+                <td>${i + 1}</td>
+                <td><span class="badge badge-xs ${t.side === 'long' ? 'badge-success' : 'badge-error'}">${t.side}</span></td>
+                <td>${t.qty}</td>
+                <td>${t.entry_price.toFixed(2)}</td>
+                <td>${t.exit_price.toFixed(2)}</td>
+                <td class="${pnlClass} font-medium">${formatCurrency(t.pnl)}</td>
+                <td class="text-xs">${formatTime(t.entry_time)}</td>
+            </tr>`;
+        });
+        document.getElementById('trade-count').textContent = data.trades.length + ' trades';
+        document.getElementById('trades-panel').classList.remove('hidden');
+    }
+}
+
+function renderEquityChart(curve) {
+    const ctx = document.getElementById('equity-chart').getContext('2d');
+    if (equityChart) equityChart.destroy();
+
+    const labels = curve.map(p => formatTime(p.time));
+    const values = curve.map(p => p.equity);
+
+    equityChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels,
+            datasets: [{
+                label: 'Equity',
+                data: values,
+                borderColor: '#3b82f6',
+                backgroundColor: 'rgba(59,130,246,0.08)',
+                fill: true,
+                tension: 0.1,
+                pointRadius: 0,
+                borderWidth: 1.5,
+            }]
+        },
+        options: {
+            responsive: true,
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    callbacks: { label: (c) => formatCurrency(c.raw) }
+                }
+            },
+            scales: {
+                x: { display: true, ticks: { maxTicksLimit: 8, font: { size: 10 } } },
+                y: {
+                    display: true,
+                    ticks: {
+                        font: { size: 10 },
+                        callback: (v) => formatCurrency(v)
+                    }
+                }
+            },
+            interaction: { intersect: false, mode: 'index' },
+        }
+    });
+}
+
+// ── Result History ──
+async function loadResults() {
+    try {
+        const res = await fetch('/api/backtest/results?limit=20', { headers: apiHeaders() });
+        const data = await res.json();
+        const el = document.getElementById('result-history');
+        if (!data.length) { el.innerHTML = '<div class="text-sm text-gray-400">No results yet</div>'; return; }
+        el.innerHTML = data.map(r => {
+            const pnl = r.metrics?.total_pnl || 0;
+            const cls = pnl >= 0 ? 'text-success' : 'text-error';
+            return `<div class="flex items-center justify-between py-1 px-2 rounded hover:bg-base-200 cursor-pointer text-sm" onclick="loadResult(${r.id})">
+                <div>
+                    <span class="font-medium">${r.strategy_name || 'Custom'}</span>
+                    <span class="text-xs text-gray-400 ml-1">${r.instrument_key}</span>
+                </div>
+                <div class="flex items-center gap-2">
+                    <span class="${cls} font-medium">${formatCurrency(pnl)}</span>
+                    <button onclick="event.stopPropagation();deleteResult(${r.id})" class="btn btn-ghost btn-xs text-error">x</button>
+                </div>
+            </div>`;
+        }).join('');
+    } catch (e) { console.error('Failed to load results:', e); }
+}
+
+async function deleteResult(id) {
+    await fetch(`/api/backtest/results/${id}`, { method: 'DELETE', headers: apiHeaders() });
+    loadResults();
+}
+
+// ── Helpers ──
+function formatCurrency(val) {
+    if (val === null || val === undefined) return '-';
+    const abs = Math.abs(val);
+    if (abs >= 10000000) return (val / 10000000).toFixed(2) + ' Cr';
+    if (abs >= 100000) return (val / 100000).toFixed(2) + ' L';
+    return val.toLocaleString('en-IN', { maximumFractionDigits: 0 });
+}
+
+function formatTime(ts) {
+    if (!ts) return '-';
+    const d = new Date(ts);
+    return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: '2-digit' });
+}
+</script>
+{% endblock %}

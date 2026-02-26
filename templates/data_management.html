@@ -1,0 +1,234 @@
+{% extends "base.html" %}
+
+{% block title %}Data Management - ExpiryTrack{% endblock %}
+
+{% block content %}
+<div class="max-w-5xl mx-auto">
+    <div class="flex items-center justify-between mb-8">
+        <h1 class="text-3xl font-bold supabase-text-gradient">Data Management</h1>
+        <button onclick="loadStorageEstimate()" class="btn-supabase text-sm">Refresh</button>
+    </div>
+
+    <!-- Storage Overview -->
+    <div class="card-minimal p-6 mb-6">
+        <h3 class="text-lg font-semibold mb-4">Storage Overview</h3>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div class="text-center">
+                <div id="s-historical" class="text-2xl font-bold text-gray-800">-</div>
+                <div class="text-xs text-gray-500">Historical Rows</div>
+            </div>
+            <div class="text-center">
+                <div id="s-candle" class="text-2xl font-bold text-gray-800">-</div>
+                <div class="text-xs text-gray-500">Candle Rows</div>
+            </div>
+            <div class="text-center">
+                <div id="s-total" class="text-2xl font-bold text-blue-600">-</div>
+                <div class="text-xs text-gray-500">Total Rows</div>
+            </div>
+            <div class="text-center">
+                <div id="s-size" class="text-2xl font-bold text-green-600">-</div>
+                <div class="text-xs text-gray-500">Est. Size (MB)</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Delete by Instrument -->
+    <div class="card-minimal p-6 mb-6">
+        <h3 class="text-lg font-semibold mb-4">Delete by Instrument</h3>
+        <p class="text-sm text-gray-500 mb-4">Remove ALL historical data and candle data for a specific instrument.</p>
+        <div class="flex items-end gap-4">
+            <div class="flex-1">
+                <label class="text-sm text-gray-500 font-medium block mb-1">Instrument</label>
+                <select id="del-instrument" class="select select-bordered select-sm w-full max-w-xs">
+                    <option value="">Select instrument...</option>
+                </select>
+            </div>
+            <button onclick="deleteByInstrument()" class="btn btn-sm btn-error">Delete All Data</button>
+        </div>
+        <div id="del-instrument-preview" class="mt-3 text-sm text-gray-500"></div>
+    </div>
+
+    <!-- Delete by Expiry -->
+    <div class="card-minimal p-6 mb-6">
+        <h3 class="text-lg font-semibold mb-4">Delete by Expiry</h3>
+        <p class="text-sm text-gray-500 mb-4">Remove data for a specific instrument + expiry date combination. Contracts will be reset to unfetched.</p>
+        <div class="flex flex-wrap items-end gap-4">
+            <div>
+                <label class="text-sm text-gray-500 font-medium block mb-1">Instrument</label>
+                <select id="del-expiry-instrument" onchange="loadExpiries()" class="select select-bordered select-sm w-48">
+                    <option value="">Select instrument...</option>
+                </select>
+            </div>
+            <div>
+                <label class="text-sm text-gray-500 font-medium block mb-1">Expiry Date</label>
+                <select id="del-expiry-date" class="select select-bordered select-sm w-48">
+                    <option value="">Select expiry...</option>
+                </select>
+            </div>
+            <button onclick="deleteByExpiry()" class="btn btn-sm btn-error">Delete Expiry Data</button>
+        </div>
+    </div>
+
+    <!-- Delete by Date Range -->
+    <div class="card-minimal p-6 mb-6">
+        <h3 class="text-lg font-semibold mb-4">Delete by Date Range</h3>
+        <p class="text-sm text-gray-500 mb-4">Remove historical candle data within a specific date range. Optionally filter by instrument.</p>
+        <div class="flex flex-wrap items-end gap-4">
+            <div>
+                <label class="text-sm text-gray-500 font-medium block mb-1">Instrument (optional)</label>
+                <select id="del-range-instrument" class="select select-bordered select-sm w-48">
+                    <option value="">All instruments</option>
+                </select>
+            </div>
+            <div>
+                <label class="text-sm text-gray-500 font-medium block mb-1">From Date</label>
+                <input type="date" id="del-from-date" class="input input-bordered input-sm w-40" />
+            </div>
+            <div>
+                <label class="text-sm text-gray-500 font-medium block mb-1">To Date</label>
+                <input type="date" id="del-to-date" class="input input-bordered input-sm w-40" />
+            </div>
+            <button onclick="deleteByDateRange()" class="btn btn-sm btn-error">Delete Range</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function fmt(n) {
+    if (n == null) return '-';
+    return n.toLocaleString();
+}
+
+// ── Load instruments ──
+async function loadInstruments() {
+    try {
+        const res = await fetch('/api/admin/instruments-list');
+        const instruments = await res.json();
+        const selectors = ['del-instrument', 'del-expiry-instrument', 'del-range-instrument'];
+        selectors.forEach(id => {
+            const sel = document.getElementById(id);
+            const first = sel.options[0].textContent;
+            sel.innerHTML = `<option value="">${first}</option>`;
+            instruments.forEach(i => {
+                const opt = document.createElement('option');
+                opt.value = i.instrument_key;
+                opt.textContent = i.symbol || i.instrument_key;
+                sel.appendChild(opt);
+            });
+        });
+    } catch (e) { console.error('Failed to load instruments:', e); }
+}
+
+// ── Storage estimate ──
+async function loadStorageEstimate() {
+    try {
+        const res = await fetch('/api/admin/storage-estimate');
+        const d = await res.json();
+        document.getElementById('s-historical').textContent = fmt(d.historical_rows);
+        document.getElementById('s-candle').textContent = fmt(d.candle_rows);
+        document.getElementById('s-total').textContent = fmt(d.total_rows);
+        document.getElementById('s-size').textContent = d.estimated_size_mb + ' MB';
+    } catch (e) { console.error('Failed to load storage:', e); }
+}
+
+// ── Load expiries for instrument ──
+async function loadExpiries() {
+    const instrument = document.getElementById('del-expiry-instrument').value;
+    const sel = document.getElementById('del-expiry-date');
+    sel.innerHTML = '<option value="">Select expiry...</option>';
+    if (!instrument) return;
+
+    try {
+        const res = await fetch(`/api/analytics/expiry-dates?instrument=${encodeURIComponent(instrument)}`);
+        const data = await res.json();
+        const expiries = data.expiry_dates || data;
+        expiries.forEach(e => {
+            const opt = document.createElement('option');
+            opt.value = typeof e === 'string' ? e : e.expiry_date;
+            opt.textContent = opt.value;
+            sel.appendChild(opt);
+        });
+    } catch (e) { console.error('Failed to load expiries:', e); }
+}
+
+// ── Delete by Instrument ──
+async function deleteByInstrument() {
+    const instrument = document.getElementById('del-instrument').value;
+    if (!instrument) { showToast('Please select an instrument', 'warning'); return; }
+    if (!confirm(`DELETE ALL DATA for ${instrument}?\n\nThis will remove ALL historical and candle data for this instrument. This cannot be undone!`)) return;
+
+    try {
+        const res = await fetch('/api/admin/delete-data', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ type: 'instrument', instrument_key: instrument })
+        });
+        const data = await res.json();
+        if (data.success) {
+            showToast(`Deleted ${data.deleted_rows.toLocaleString()} rows`, 'success');
+            loadStorageEstimate();
+        } else {
+            showToast('Failed: ' + (data.error || 'Unknown error'), 'error');
+        }
+    } catch (e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+// ── Delete by Expiry ──
+async function deleteByExpiry() {
+    const instrument = document.getElementById('del-expiry-instrument').value;
+    const expiry = document.getElementById('del-expiry-date').value;
+    if (!instrument || !expiry) { showToast('Please select instrument and expiry', 'warning'); return; }
+    if (!confirm(`Delete all data for ${instrument} expiry ${expiry}?\n\nContracts will be reset to unfetched status.`)) return;
+
+    try {
+        const res = await fetch('/api/admin/delete-data', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ type: 'expiry', instrument_key: instrument, expiry_date: expiry })
+        });
+        const data = await res.json();
+        if (data.success) {
+            showToast(`Deleted ${data.deleted_rows.toLocaleString()} rows`, 'success');
+            loadStorageEstimate();
+        } else {
+            showToast('Failed: ' + (data.error || 'Unknown error'), 'error');
+        }
+    } catch (e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+// ── Delete by Date Range ──
+async function deleteByDateRange() {
+    const instrument = document.getElementById('del-range-instrument').value;
+    const fromDate = document.getElementById('del-from-date').value;
+    const toDate = document.getElementById('del-to-date').value;
+    if (!fromDate || !toDate) { showToast('Please select from and to dates', 'warning'); return; }
+    if (fromDate > toDate) { showToast('From date must be before to date', 'warning'); return; }
+
+    const scope = instrument ? `${instrument} from ${fromDate} to ${toDate}` : `all instruments from ${fromDate} to ${toDate}`;
+    if (!confirm(`Delete data for ${scope}?\n\nThis cannot be undone!`)) return;
+
+    try {
+        const res = await fetch('/api/admin/delete-data', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ type: 'date_range', instrument_key: instrument || null, from_date: fromDate, to_date: toDate })
+        });
+        const data = await res.json();
+        if (data.success) {
+            showToast(`Deleted ${data.deleted_rows.toLocaleString()} rows`, 'success');
+            loadStorageEstimate();
+        } else {
+            showToast('Failed: ' + (data.error || 'Unknown error'), 'error');
+        }
+    } catch (e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+// Init
+document.addEventListener('DOMContentLoaded', () => {
+    loadInstruments();
+    loadStorageEstimate();
+});
+</script>
+{% endblock %}

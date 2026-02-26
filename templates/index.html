@@ -37,9 +37,37 @@
                         </div>
                         {% endif %}
 
-                        <div class="flex gap-4 justify-center">
-                            <a href="/collect" class="btn-supabase">Start Data Collection</a>
-                            <a href="{{ url_for('status_page') }}" class="btn bg-gray-100 text-gray-700 hover:bg-gray-200 font-medium py-2 px-4 rounded-lg">View Statistics</a>
+                        <!-- Data Freshness (D9) -->
+                        {% if freshness %}
+                        <div class="flex items-center justify-center gap-6 mb-6 text-sm text-gray-500">
+                            {% if freshness.last_collection_at %}
+                            <div class="flex items-center gap-1.5" title="Last completed collection: {{ freshness.last_collection_at }}">
+                                <svg class="w-4 h-4 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                                </svg>
+                                <span>Last collection: <span id="freshness-ago" data-ts="{{ freshness.last_collection_at }}">--</span></span>
+                            </div>
+                            {% endif %}
+                            {% if freshness.newest_data_date %}
+                            <div class="flex items-center gap-1.5" title="Most recent data point in database">
+                                <svg class="w-4 h-4 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+                                </svg>
+                                <span>Newest data: {{ freshness.newest_data_date }}</span>
+                            </div>
+                            {% endif %}
+                        </div>
+                        {% endif %}
+
+                        <!-- Smart Collect Result -->
+                        <div id="smart-collect-result" class="hidden mb-4 card-minimal p-4 border-blue-200 bg-blue-50 text-left">
+                            <div id="smart-collect-info" class="text-sm text-blue-700"></div>
+                        </div>
+
+                        <div class="flex gap-4 justify-center flex-wrap">
+                            <button onclick="smartCollect()" id="btn-smart-collect" class="btn bg-blue-500 text-white hover:bg-blue-600 font-medium py-2 px-4 rounded-lg">Smart Collect</button>
+                            <a href="/collect" class="btn-supabase">Collection Wizard</a>
+                            <a href="{{ url_for('status.status_page') }}" class="btn bg-gray-100 text-gray-700 hover:bg-gray-200 font-medium py-2 px-4 rounded-lg">View Statistics</a>
                         </div>
                     </div>
                 </div>
@@ -91,4 +119,94 @@
             </div>
         </div>
     </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function smartCollect() {
+    const btn = document.getElementById('btn-smart-collect');
+    const resultDiv = document.getElementById('smart-collect-result');
+    const infoDiv = document.getElementById('smart-collect-info');
+    btn.disabled = true;
+    btn.textContent = 'Scanning...';
+    resultDiv.classList.add('hidden');
+
+    try {
+        const res = await fetch('/api/collect/smart', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({})
+        });
+        const data = await res.json();
+        resultDiv.classList.remove('hidden');
+
+        if (!data.success) {
+            infoDiv.innerHTML = '<span class="text-red-600">' + escapeHtml(data.error || 'Failed') + '</span>';
+        } else if (data.pending_contracts === 0) {
+            infoDiv.innerHTML = '<span class="text-green-600">All data is up to date! No unfetched contracts found.</span>';
+        } else {
+            const est = data.estimation || {};
+            infoDiv.innerHTML = `
+                <p class="font-semibold text-blue-800 mb-2">Found ${data.pending_contracts} pending contracts across ${data.instruments} instrument(s), ${data.expiries} expiry date(s)</p>
+                <div class="grid grid-cols-3 gap-2 mb-3 text-center">
+                    <div><div class="font-bold">${est.api_calls || 0}</div><div class="text-xs">API Calls</div></div>
+                    <div><div class="font-bold">${est.est_time_display || '-'}</div><div class="text-xs">Est. Time</div></div>
+                    <div><div class="font-bold">${est.est_storage_display || '-'}</div><div class="text-xs">Est. Storage</div></div>
+                </div>
+                <button onclick="startSmartCollect()" class="btn-supabase text-sm">Start Smart Collection</button>
+            `;
+        }
+    } catch (e) {
+        resultDiv.classList.remove('hidden');
+        infoDiv.innerHTML = '<span class="text-red-600">Error: ' + escapeHtml(e.message) + '</span>';
+    }
+    btn.disabled = false;
+    btn.textContent = 'Smart Collect';
+}
+
+async function startSmartCollect() {
+    try {
+        const res = await fetch('/api/collect/smart', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ auto_start: true })
+        });
+        const data = await res.json();
+        if (data.task_id) {
+            showToast('Smart collection started! Check Status page for progress.', 'success');
+            setTimeout(function() { window.location.href = '/status'; }, 2000);
+        } else if (data.error) {
+            showToast(data.error, 'error');
+        } else {
+            showToast(data.message || 'No pending contracts', 'info');
+        }
+    } catch (e) {
+        showToast('Error: ' + e.message, 'error');
+    }
+}
+
+// Data freshness — compute "X hours ago" from timestamp
+(function() {
+    var el = document.getElementById('freshness-ago');
+    if (!el) return;
+    var ts = el.getAttribute('data-ts');
+    if (!ts || ts === 'None') { el.textContent = 'N/A'; return; }
+
+    function update() {
+        var then = new Date(ts.replace(' ', 'T'));
+        var now = new Date();
+        var diffMs = now - then;
+        if (isNaN(diffMs) || diffMs < 0) { el.textContent = ts; return; }
+        var diffMins = Math.floor(diffMs / 60000);
+        var diffHrs = Math.floor(diffMins / 60);
+        var diffDays = Math.floor(diffHrs / 24);
+        if (diffMins < 1) el.textContent = 'just now';
+        else if (diffMins < 60) el.textContent = diffMins + ' min ago';
+        else if (diffHrs < 24) el.textContent = diffHrs + 'h ' + (diffMins % 60) + 'm ago';
+        else el.textContent = diffDays + 'd ' + (diffHrs % 24) + 'h ago';
+    }
+    update();
+    setInterval(update, 60000);
+})();
+</script>
 {% endblock %}
