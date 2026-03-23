@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html><head>
+<meta charset="UTF-8">
+<title>William Fractals (n=10) — Trade Charts</title>
+<style>
+  body{font-family:'Segoe UI',sans-serif;background:#1a1a2e;color:#eee;margin:20px}
+  h1{color:#f0b90b} h2{color:#aaa}
+  table{border-collapse:collapse;width:100%;margin-top:15px}
+  th{background:#16213e;color:#00d2ff;padding:10px;text-align:left;position:sticky;top:0}
+  td{padding:8px 10px;border-bottom:1px solid #333}
+  tr:hover{background:#16213e}
+  a{color:#00d2ff;text-decoration:none} a:hover{text-decoration:underline}
+  .profit{color:#26a69a;font-weight:bold} .loss{color:#ef5350;font-weight:bold}
+  .summary{background:#16213e;padding:15px;border-radius:8px;margin:15px 0;display:flex;gap:30px;flex-wrap:wrap}
+  .stat{text-align:center} .sv{font-size:24px;font-weight:bold} .sl{font-size:12px;color:#888}
+  .legend{background:#16213e;padding:12px 18px;border-radius:6px;margin:12px 0;font-size:13px;display:flex;gap:28px}
+  .lrow{display:flex;align-items:center;gap:8px}
+  .dot{width:12px;height:12px;border-radius:50%;display:inline-block}
+</style>
+</head><body>
+<h1>William Fractals (n=10, 21-candle) — NIFTY Credit Spread</h1>
+<h2>500pt Spread | 3 lots × 65 | Session-boundary safe | Matches TradingView Fractals(21)</h2>
+
+<div class="legend">
+  <div class="lrow"><div class="dot" style="background:#ef5350"></div>
+    <span>Up Fractal ▼ above bar → BEAR_CALL (sell CE hedge)</span></div>
+  <div class="lrow"><div class="dot" style="background:#26a69a"></div>
+    <span>Down Fractal ▲ below bar → BULL_PUT (sell PE hedge)</span></div>
+  <div class="lrow"><span style="color:#aaa;font-size:12px">
+    Marker placed at <b>confirmation bar</b> (centre + 10 bars). Centre bar time shown in tooltip.</span></div>
+</div>
+
+<div class="summary">
+  <div class="stat"><div class="sv">2</div><div class="sl">Trading Days</div></div>
+  <div class="stat"><div class="sv">5</div><div class="sl">Total Trades</div></div>
+  <div class="stat"><div class="sv">3</div><div class="sl">Winners</div></div>
+  <div class="stat"><div class="sv profit">₹18,762</div><div class="sl">Net P&L</div></div>
+</div>
+
+<p>Click any date to view NIFTY + Fractal signals + Option candle charts.</p>
+<table>
+<tr><th>Date</th><th>Day</th><th>Trades</th><th>Wins</th><th>Losses</th><th>Day P&L</th><th>Cum P&L</th></tr>
+<tr>
+            <td><a href="2026-03-12.html">2026-03-12</a></td>
+            <td>Thursday</td>
+            <td>1 (1ON)</td>
+            <td>1</td><td>0</td>
+            <td class="profit">₹24,191</td>
+            <td class="profit">₹24,191</td>
+        </tr><tr>
+            <td><a href="2026-03-13.html">2026-03-13</a></td>
+            <td>Friday</td>
+            <td>4 (1ON)</td>
+            <td>2</td><td>2</td>
+            <td class="loss">₹-5,429</td>
+            <td class="profit">₹18,762</td>
+        </tr>
+</table>
+</body></html>

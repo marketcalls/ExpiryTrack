@@ -7,12 +7,7 @@ __author__ = "ExpiryTrack Team"
 
 from .api.client import UpstoxAPIClient
 from .auth.manager import AuthManager
-from .database.manager import DatabaseManager
 from .collectors.expiry_tracker import ExpiryTracker
+from .database.manager import DatabaseManager
 
-__all__ = [
-    "UpstoxAPIClient",
-    "AuthManager",
-    "DatabaseManager",
-    "ExpiryTracker"
-]
+__all__ = ["UpstoxAPIClient", "AuthManager", "DatabaseManager", "ExpiryTracker"]

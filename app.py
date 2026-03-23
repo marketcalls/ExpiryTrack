@@ -1,448 +1,205 @@
 """
 ExpiryTrack Web Interface - Flask Application
 """
-import asyncio
-from flask import Flask, render_template, redirect, url_for, request, session, jsonify, flash
-from flask_sqlalchemy import SQLAlchemy
+
+import os
+import secrets
 from datetime import datetime
-import json
+
+from flask import Flask, Response, jsonify, redirect, render_template, session
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
+from flask_wtf.csrf import CSRFProtect
 
 from src.auth.manager import AuthManager
-from src.collectors.expiry_tracker import ExpiryTracker
-from src.database.manager import DatabaseManager
 from src.config import config
-from src.utils.instrument_mapper import (
-    get_instrument_key, get_display_name,
-    get_all_display_names, INSTRUMENT_MAPPING
-)
-import secrets
+from src.database.manager import DatabaseManager
+from src.utils.logger import setup_logging
+
+setup_logging()
 
 app = Flask(__name__)
-app.secret_key = secrets.token_hex(32)  # Generate random secret key
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///upstox_app.db'
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 
-db = SQLAlchemy(app)
+# CSRF protection — all POST/PUT/PATCH/DELETE endpoints require a token
+csrf = CSRFProtect(app)
+
+# Rate limiting — default 60 requests/minute per IP
+limiter = Limiter(get_remote_address, app=app, default_limits=["60 per minute"])
+
+# Apply per-endpoint rate limits after blueprints are registered (below)
+
+# Persist secret key across restarts
+_secret_key_path = config.DATA_DIR / ".flask_secret_key"
+if _secret_key_path.exists():
+    app.secret_key = _secret_key_path.read_text().strip()
+else:
+    app.secret_key = secrets.token_hex(32)
+    _secret_key_path.parent.mkdir(parents=True, exist_ok=True)
+    _secret_key_path.write_text(app.secret_key)
+    try:
+        import stat
+
+        os.chmod(_secret_key_path, stat.S_IRUSR | stat.S_IWUSR)
+    except OSError:
+        pass
 
 # Initialize managers
 auth_manager = AuthManager()
 db_manager = DatabaseManager()
 
+# Store managers on app for blueprint access via current_app
+app.auth_manager = auth_manager
+app.db_manager = db_manager
+
+
+# Clear stale session (useful after DB reset) — POST only to prevent CSRF forced-logout
+@app.route("/clear-session", methods=["POST"])
+def clear_session():
+    session.clear()
+    return redirect("/")
+
+
 # Context processor to make is_authenticated available in all templates
 @app.context_processor
 def inject_auth_status():
-    return {'is_authenticated': auth_manager.is_token_valid()}
+    return {"is_authenticated": auth_manager.is_token_valid(), "port": config.PORT}
 
-@app.route('/')
-def index():
-    """Home page"""
-    # Check if authenticated
+
+# ── Register Blueprints ──
+from src.routes.admin import admin_bp  # noqa: E402
+from src.routes.analytics import analytics_bp  # noqa: E402
+from src.routes.auth import auth_bp  # noqa: E402
+from src.routes.backtest import backtest_bp  # noqa: E402
+from src.routes.candles import candles_bp  # noqa: E402
+from src.routes.collect import collect_bp  # noqa: E402
+from src.routes.export import export_bp  # noqa: E402
+from src.routes.instruments import instruments_bp  # noqa: E402
+from src.routes.sse import sse_bp  # noqa: E402
+from src.routes.status import status_bp  # noqa: E402
+from src.routes.tasks import tasks_bp  # noqa: E402
+from src.routes.watchlists import watchlists_bp  # noqa: E402
+
+app.register_blueprint(auth_bp)
+app.register_blueprint(collect_bp)
+app.register_blueprint(export_bp)
+app.register_blueprint(instruments_bp)
+app.register_blueprint(watchlists_bp)
+app.register_blueprint(candles_bp)
+app.register_blueprint(status_bp)
+app.register_blueprint(admin_bp)
+app.register_blueprint(analytics_bp)
+app.register_blueprint(tasks_bp)
+app.register_blueprint(sse_bp)
+app.register_blueprint(backtest_bp)
+
+# REST API blueprints (exempt from CSRF — use API key auth, not session cookies)
+from src.api.v1 import api_v1  # noqa: E402
+from src.api.v2 import api_v2  # noqa: E402
+
+app.register_blueprint(api_v1)
+app.register_blueprint(api_v2)
+csrf.exempt(api_v1)
+csrf.exempt(api_v2)
+csrf.exempt(sse_bp)
+
+# Register error handlers (404, 405, 500)
+from src.routes.errors import register_error_handlers  # noqa: E402
+
+register_error_handlers(app)
+
+# ── Per-endpoint rate limits ──
+# Collection endpoints — each triggers Upstox API calls
+limiter.limit("5 per minute")(app.view_functions["collect.api_collect_start"])
+# Export endpoints — file generation is CPU-intensive
+for _ep in ("export.api_export_start", "export.api_export_available_expiries"):
+    if _ep in app.view_functions:
+        limiter.limit("10 per minute")(app.view_functions[_ep])
+# Backup — full DB copy
+if "admin.api_backup_create" in app.view_functions:
+    limiter.limit("3 per minute")(app.view_functions["admin.api_backup_create"])
+# Backtest run — CPU-intensive
+if "backtest.api_run_backtest" in app.view_functions:
+    limiter.limit("5 per minute")(app.view_functions["backtest.api_run_backtest"])
+# Auth login — prevent brute force
+if "auth.login" in app.view_functions:
+    limiter.limit("10 per minute")(app.view_functions["auth.login"])
+# Status polling endpoints — polled frequently by UI during active tasks
+for _ep in ("candles.api_candles_status", "candles.api_candles_tasks",
+            "tasks.api_tasks_get", "tasks.api_tasks_list"):
+    if _ep in app.view_functions:
+        limiter.limit("300 per minute")(app.view_functions[_ep])
+
+# ── Core Routes (kept in app.py) ──
+
+
+@app.route("/")
+def index() -> str:
+    """Home page."""
     is_authenticated = auth_manager.is_token_valid()
-
-    # Get database stats
     stats = None
+    freshness = None
     if is_authenticated:
         try:
             stats = db_manager.get_summary_stats()
-        except:
+        except Exception:
             stats = None
-
-    # Get messages from session
-    message = session.pop('message', None)
-    error = session.pop('error', None)
-
-    return render_template('index.html',
-                         is_authenticated=is_authenticated,
-                         stats=stats,
-                         message=message,
-                         error=error)
-
-@app.route('/settings')
-def settings():
-    """Settings page for API credentials"""
-    # Get credentials from database
-    has_credentials = auth_manager.has_credentials()
-    credential = None
-    if has_credentials:
-        creds = db_manager.get_credentials()
-        if creds:
-            credential = {
-                'api_key': creds['api_key'],
-                'api_secret': '***' + creds['api_secret'][-4:] if creds['api_secret'] else '',
-                'redirect_url': creds['redirect_uri']
-            }
-    return render_template('settings.html', credential=credential, has_credentials=has_credentials)
-
-@app.route('/save_credentials', methods=['POST'])
-def save_credentials():
-    """Save API credentials to database (encrypted)"""
-    api_key = request.form.get('api_key')
-    api_secret = request.form.get('api_secret')
-    redirect_url = request.form.get('redirect_url')
-
-    # Save to database using AuthManager (encrypted)
-    if auth_manager.save_credentials(api_key, api_secret, redirect_url):
-        session['message'] = 'Credentials saved successfully!'
-    else:
-        session['error'] = 'Failed to save credentials'
-
-    return redirect(url_for('settings'))
-
-@app.route('/login')
-def login():
-    """Start OAuth login flow"""
-    if not auth_manager.has_credentials():
-        session['error'] = 'Please configure API credentials first'
-        return redirect(url_for('settings'))
-
-    try:
-        auth_url = auth_manager.get_authorization_url()
-        return redirect(auth_url)
-    except ValueError as e:
-        session['error'] = str(e)
-        return redirect(url_for('settings'))
-
-@app.route('/upstox/callback')
-def upstox_callback():
-    """Handle OAuth callback"""
-    auth_code = request.args.get('code')
-    error = request.args.get('error')
-
-    if error:
-        return f"Authentication failed: {error}", 400
-
-    if auth_code:
-        # Exchange code for token
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        success = loop.run_until_complete(
-            auth_manager.exchange_code_for_token(auth_code)
-        )
-        loop.close()
-
-        if success:
-            # Redirect to home page after successful login
-            flash('Successfully authenticated with Upstox! You can now start collecting data.', 'success')
-            return redirect(url_for('index'))
-        else:
-            flash('Failed to authenticate with Upstox. Please try again.', 'error')
-            return redirect(url_for('settings'))
-
-    return "No authorization code received", 400
-
-
-@app.route('/api/expiries/<instrument>')
-def api_expiries(instrument):
-    """API endpoint to get expiries"""
-    if not auth_manager.is_token_valid():
-        return jsonify({'error': 'Not authenticated'}), 401
-
-    # Convert display name to instrument key if needed
-    instrument_key = get_instrument_key(instrument)
-
-    async def get_expiries():
-        tracker = ExpiryTracker(auth_manager=auth_manager)
-        async with tracker:
-            return await tracker.get_expiries(instrument_key)
-
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    expiries = loop.run_until_complete(get_expiries())
-    loop.close()
-
-    return jsonify({
-        'instrument': instrument,
-        'instrument_key': instrument_key,
-        'expiries': expiries
-    })
-
-@app.route('/api/instruments/expiries', methods=['POST'])
-def api_instruments_expiries():
-    """API endpoint to get expiries for multiple instruments"""
-    if not auth_manager.is_token_valid():
-        return jsonify({'error': 'Not authenticated'}), 401
-
-    data = request.json
-    if not data or 'instruments' not in data:
-        return jsonify({'error': 'Missing instruments list'}), 400
-
-    instruments = data['instruments']
-    if not isinstance(instruments, list) or not instruments:
-        return jsonify({'error': 'Invalid instruments list'}), 400
-
-    async def get_all_expiries():
-        tracker = ExpiryTracker(auth_manager=auth_manager)
-        async with tracker:
-            expiries_data = {}
-            for instrument in instruments:
-                try:
-                    instrument_key = get_instrument_key(instrument)
-                    expiries = await tracker.get_expiries(instrument_key)
-                    expiries_data[instrument] = expiries
-                except Exception as e:
-                    expiries_data[instrument] = []
-            return expiries_data
-
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    expiries_data = loop.run_until_complete(get_all_expiries())
-    loop.close()
-
-    return jsonify({
-        'expiries': expiries_data
-    })
-
-@app.route('/collect')
-def collect_page():
-    """Collection wizard page"""
-    if not auth_manager.has_credentials():
-        session['error'] = 'Please configure API credentials first'
-        return redirect(url_for('settings'))
-
-    if not auth_manager.is_token_valid():
-        session['error'] = 'Please authenticate first'
-        return redirect(url_for('login'))
-
-    # Use the new wizard template
-    return render_template('collect_wizard.html')
-
-@app.route('/api/collect/start', methods=['POST'])
-def api_collect_start():
-    """Start a new collection task"""
-    if not auth_manager.is_token_valid():
-        return jsonify({'error': 'Not authenticated'}), 401
-
-    data = request.json
-
-    # Import task manager
-    from src.collectors.task_manager import task_manager
-
-    # Create and start task
-    task_id = task_manager.create_task(data)
-
-    return jsonify({
-        'success': True,
-        'task_id': task_id,
-        'status': 'started',
-        'message': 'Collection task started'
-    })
-
-@app.route('/api/collect/status/<task_id>')
-def api_collect_status(task_id):
-    """Get status of a collection task"""
-    from src.collectors.task_manager import task_manager
-
-    status = task_manager.get_task_status(task_id)
-    if status:
-        # Debug log to see what's being returned
-        logs_count = len(status.get('logs', []))
-        print(f"DEBUG: Task {task_id} - Status: {status.get('status')}, Logs count: {logs_count}")
-        if logs_count > 0:
-            print(f"DEBUG: Sample log: {status['logs'][-1]}")
-        return jsonify(status)
-    else:
-        return jsonify({'error': 'Task not found'}), 404
-
-@app.route('/api/collect/tasks')
-def api_collect_tasks():
-    """Get all collection tasks"""
-    from src.collectors.task_manager import task_manager
-
-    tasks = task_manager.get_all_tasks()
-    return jsonify({'tasks': tasks})
-
-@app.route('/status')
-def status_page():
-    """Status page showing database statistics and recent tasks"""
-    if not auth_manager.is_token_valid():
-        session['error'] = 'Please authenticate first'
-        return redirect(url_for('login'))
-
-    # Get database stats
-    stats = db_manager.get_summary_stats()
-
-    # Get recent tasks
-    from src.collectors.task_manager import task_manager
-    tasks = task_manager.get_all_tasks()
-
-    # Sort tasks by created_at (most recent first)
-    tasks.sort(key=lambda x: x.get('created_at', ''), reverse=True)
-
-    return render_template('status.html', stats=stats, tasks=tasks[:10])  # Show last 10 tasks
-
-@app.route('/help')
-def help_page():
-    """Help page with CLI commands and OpenAlgo documentation"""
-    return render_template('help.html')
-
-# Export Routes
-@app.route('/export')
-def export_wizard():
-    """Export wizard page"""
-    if not auth_manager.has_credentials():
-        session['error'] = 'Please configure API credentials first'
-        return redirect(url_for('settings'))
-
-    if not auth_manager.is_token_valid():
-        session['error'] = 'Please authenticate first'
-        return redirect(url_for('login'))
-
-    return render_template('export_wizard.html')
-
-@app.route('/api/export/available-expiries', methods=['POST'])
-def api_export_available_expiries():
-    """Get available expiries for selected instruments"""
-    from src.export.exporter import DataExporter
-
-    data = request.json
-    instruments = data.get('instruments', [])
-
-    exporter = DataExporter(db_manager)
-    expiries = exporter.get_available_expiries(instruments)
-
-    return jsonify(expiries)
-
-# Global dictionary to store export tasks
-export_tasks = {}
-
-@app.route('/api/export/start', methods=['POST'])
-def api_export_start():
-    """Start export task"""
-    from src.export.exporter import DataExporter
-    import uuid
-    import threading
-
-    data = request.json
-    task_id = str(uuid.uuid4())
-
-    # Initialize task status
-    export_tasks[task_id] = {
-        'task_id': task_id,
-        'status': 'processing',
-        'progress': 0,
-        'status_message': 'Preparing export...',
-        'file_path': None,
-        'error': None
-    }
-
-    # Run export in background thread
-    def run_export():
         try:
-            import logging
-            logging.basicConfig(level=logging.DEBUG)
-            logger = logging.getLogger(__name__)
+            from src.analytics.engine import AnalyticsEngine
 
-            logger.info(f"Starting export task {task_id}")
-            logger.debug(f"Export data: instruments={data.get('instruments')}, expiries={data.get('expiries')}, options={data.get('options')}")
+            engine = AnalyticsEngine(db_manager)
+            summary = engine.get_dashboard_summary()
+            freshness = {
+                "last_collection_at": summary.get("last_collection_at"),
+                "newest_data_date": summary.get("newest_data_date"),
+            }
+        except Exception:
+            freshness = None
+    message = session.pop("message", None)
+    error = session.pop("error", None)
+    return render_template("index.html", is_authenticated=is_authenticated, stats=stats, freshness=freshness, message=message, error=error)
 
-            exporter = DataExporter(db_manager)
 
-            # Update progress
-            export_tasks[task_id]['progress'] = 20
-            export_tasks[task_id]['status_message'] = 'Gathering data...'
+@app.route("/help")
+def help_page() -> str:
+    """Help page."""
+    return render_template("help.html")
 
-            format_type = data.get('format', 'csv')
-            instruments = data.get('instruments', [])
-            expiries = data.get('expiries', {})
-            options = data.get('options', {})
 
-            logger.info(f"Export parameters: format={format_type}, instruments={instruments}, expiries={expiries}")
+@app.route("/health")
+def health_check() -> Response:
+    """Health check endpoint."""
+    checks = {"status": "ok", "timestamp": datetime.now(tz=None).isoformat()}
+    try:
+        count = db_manager.get_instrument_master_count()
+        checks["database"] = "ok"
+        checks["instrument_count"] = count
+    except Exception:
+        checks["database"] = "error"
+        checks["status"] = "degraded"
+    checks["auth"] = "valid" if auth_manager.is_token_valid() else "expired"
+    return jsonify(checks)
 
-            # Update progress
-            export_tasks[task_id]['progress'] = 50
-            export_tasks[task_id]['status_message'] = f'Exporting to {format_type.upper()}...'
 
-            # Export based on format
-            logger.info(f"Starting {format_type} export...")
-            if format_type == 'csv':
-                file_path = exporter.export_to_csv(instruments, expiries, options, task_id)
-            elif format_type == 'json':
-                file_path = exporter.export_to_json(instruments, expiries, options, task_id)
-            elif format_type == 'zip':
-                file_path = exporter.export_to_zip(instruments, expiries, options, task_id)
-            else:
-                raise ValueError(f"Unknown format: {format_type}")
+# Setup default instruments if not already done
+db_manager.setup_default_instruments()
 
-            logger.info(f"Export completed: {file_path}")
+# Crash recovery: mark any stale tasks from previous run as failed
+try:
+    db_manager.tasks_repo.mark_stale_tasks_failed()
+except Exception:
+    pass
 
-            # Update task status
-            export_tasks[task_id]['status'] = 'completed'
-            export_tasks[task_id]['progress'] = 100
-            export_tasks[task_id]['status_message'] = 'Export completed successfully!'
-            export_tasks[task_id]['file_path'] = file_path
+# Start scheduler
+from src.scheduler.scheduler import scheduler_manager  # noqa: E402
 
-        except Exception as e:
-            import traceback
-            logger.error(f"Export failed: {str(e)}")
-            logger.error(traceback.format_exc())
-            export_tasks[task_id]['status'] = 'failed'
-            export_tasks[task_id]['error'] = str(e)
-            export_tasks[task_id]['status_message'] = f'Export failed: {str(e)}'
+scheduler_manager.start()
 
-    thread = threading.Thread(target=run_export)
-    thread.start()
 
-    return jsonify({'task_id': task_id})
-
-@app.route('/api/export/status/<task_id>')
-def api_export_status(task_id):
-    """Get export task status"""
-    task = export_tasks.get(task_id)
-
-    if not task:
-        return jsonify({'error': 'Task not found'}), 404
-
-    return jsonify(task)
-
-@app.route('/api/export/download/<task_id>')
-def api_export_download(task_id):
-    """Download exported file"""
-    from flask import send_file
-    import os
-
-    task = export_tasks.get(task_id)
-
-    if not task:
-        return jsonify({'error': 'Task not found'}), 404
-
-    if task['status'] != 'completed':
-        return jsonify({'error': 'Export not completed'}), 400
-
-    file_path = task['file_path']
-    if not file_path or not os.path.exists(file_path):
-        return jsonify({'error': 'File not found'}), 404
-
-    # Get filename for download
-    filename = os.path.basename(file_path)
-
-    return send_file(
-        file_path,
-        as_attachment=True,
-        download_name=filename,
-        mimetype='application/octet-stream'
-    )
-
-@app.route('/logout')
-def logout():
-    """Logout and clear tokens"""
-    auth_manager.clear_tokens()
-    session.clear()
-    return redirect(url_for('index'))
-
-# Create tables
-with app.app_context():
-    db.create_all()
-
-    # Setup default instruments if not already done
-    db_manager.setup_default_instruments()
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     import sys
-    # Disable auto-reload for exports directory
-    extra_files = None
-    if '--reload' not in sys.argv:
-        # Run without auto-reload in production mode
-        app.run(debug=False, host='127.0.0.1', port=5000)
+
+    if "--reload" not in sys.argv:
+        app.run(debug=False, host=config.HOST, port=config.PORT)
     else:
-        # Development mode with auto-reload (exclude exports directory)
-        app.run(debug=True, use_reloader=False)  # Disable reloader to prevent clearing export_tasks
+        app.run(debug=True, use_reloader=False, host=config.HOST, port=config.PORT)

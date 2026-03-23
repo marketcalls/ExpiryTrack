@@ -1,0 +1,542 @@
+{% extends "base.html" %}
+
+{% block title %}OI Analysis - ExpiryTrack{% endblock %}
+
+{% block breadcrumbs %}<li><a href="{{ url_for('analytics.analytics_page') }}" class="text-gray-500 hover:text-green-600">Analytics</a></li><li class="text-gray-700 font-medium">OI Analysis</li>{% endblock %}
+
+{% block content %}
+<div class="max-w-7xl mx-auto">
+    <div class="flex items-center justify-between mb-6">
+        <h1 class="text-3xl font-bold supabase-text-gradient">OI Analysis & Volume Profile</h1>
+    </div>
+
+    <!-- Filters -->
+    <div class="card-minimal p-4 mb-6">
+        <div class="flex flex-wrap items-end gap-4">
+            <div>
+                <label class="text-sm text-gray-500 font-medium block mb-1">Instrument</label>
+                <select id="oi-instrument" onchange="loadExpiryDates()" class="select select-bordered select-sm w-56">
+                    <option value="">Select Instrument</option>
+                </select>
+            </div>
+            <div>
+                <label class="text-sm text-gray-500 font-medium block mb-1">Expiry Date</label>
+                <select id="oi-expiry" class="select select-bordered select-sm w-44">
+                    <option value="">Select Expiry</option>
+                </select>
+            </div>
+            <button onclick="loadAllAnalytics()" class="btn-supabase text-sm">Analyze</button>
+        </div>
+    </div>
+
+    <!-- OI by Strike -->
+    <div class="card-minimal p-6 mb-6">
+        <h2 class="text-xl font-bold text-gray-800 mb-4">OI Build-up by Strike</h2>
+        <p class="text-sm text-gray-500 mb-4">Open Interest distribution across strike prices for Calls (CE) and Puts (PE)</p>
+        <div id="oi-strike-loading" class="hidden flex justify-center py-8">
+            <span class="loading loading-spinner loading-md text-success"></span>
+            <span class="ml-2 text-gray-500">Loading OI data...</span>
+        </div>
+        <div id="oi-strike-empty" class="text-center py-8 text-gray-400">
+            Select an instrument and expiry, then click Analyze
+        </div>
+        <div id="oi-strike-chart-container" class="hidden">
+            <canvas id="oi-strike-chart" height="300"></canvas>
+        </div>
+    </div>
+
+    <!-- PCR Trend -->
+    <div class="card-minimal p-6 mb-6">
+        <h2 class="text-xl font-bold text-gray-800 mb-4">Put-Call Ratio Trend</h2>
+        <p class="text-sm text-gray-500 mb-4">Daily PCR (Put OI / Call OI). PCR above 1 indicates bearish sentiment, below 1 indicates bullish</p>
+        <div id="pcr-loading" class="hidden flex justify-center py-8">
+            <span class="loading loading-spinner loading-md text-success"></span>
+            <span class="ml-2 text-gray-500">Loading PCR data...</span>
+        </div>
+        <div id="pcr-empty" class="text-center py-8 text-gray-400">
+            Select an instrument and expiry, then click Analyze
+        </div>
+        <div id="pcr-chart-container" class="hidden">
+            <canvas id="pcr-chart" height="250"></canvas>
+        </div>
+    </div>
+
+    <!-- Max Pain -->
+    <div class="card-minimal p-6 mb-6">
+        <h2 class="text-xl font-bold text-gray-800 mb-4">Max Pain Calculator</h2>
+        <p class="text-sm text-gray-500 mb-4">The strike price where total loss for option writers is minimum. This is the theoretical price at which the stock will settle on expiry.</p>
+        <div id="maxpain-loading" class="hidden flex justify-center py-8">
+            <span class="loading loading-spinner loading-md text-success"></span>
+            <span class="ml-2 text-gray-500">Calculating max pain...</span>
+        </div>
+        <div id="maxpain-empty" class="text-center py-8 text-gray-400">
+            Select an instrument and expiry, then click Analyze
+        </div>
+        <div id="maxpain-result" class="hidden">
+            <div class="flex items-center gap-4 mb-4">
+                <div class="bg-green-50 border border-green-200 rounded-lg px-4 py-2">
+                    <span class="text-sm text-green-600 font-medium">Max Pain Strike:</span>
+                    <span id="maxpain-value" class="text-lg font-bold text-green-700 ml-2">--</span>
+                </div>
+            </div>
+            <canvas id="maxpain-chart" height="300"></canvas>
+        </div>
+    </div>
+
+    <!-- OI Change Heatmap -->
+    <div class="card-minimal p-6 mb-6">
+        <h2 class="text-xl font-bold text-gray-800 mb-4">OI Change Heatmap</h2>
+        <p class="text-sm text-gray-500 mb-4">Daily OI changes across strikes. Green = OI increasing, Red = OI decreasing</p>
+        <div id="heatmap-loading" class="hidden flex justify-center py-8">
+            <span class="loading loading-spinner loading-md text-success"></span>
+            <span class="ml-2 text-gray-500">Loading heatmap...</span>
+        </div>
+        <div id="heatmap-empty" class="text-center py-8 text-gray-400">
+            Select an instrument and expiry, then click Analyze
+        </div>
+        <div id="heatmap-container" class="hidden overflow-x-auto">
+            <table class="table table-xs w-full" id="heatmap-table">
+                <thead id="heatmap-thead"></thead>
+                <tbody id="heatmap-tbody"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Volume Profile -->
+    <div class="card-minimal p-6 mb-6">
+        <h2 class="text-xl font-bold text-gray-800 mb-4">Volume Profile</h2>
+        <p class="text-sm text-gray-500 mb-4">Volume distribution across strike prices for Calls and Puts</p>
+        <div id="volume-loading" class="hidden flex justify-center py-8">
+            <span class="loading loading-spinner loading-md text-success"></span>
+            <span class="ml-2 text-gray-500">Loading volume data...</span>
+        </div>
+        <div id="volume-empty" class="text-center py-8 text-gray-400">
+            Select an instrument and expiry, then click Analyze
+        </div>
+        <div id="volume-chart-container" class="hidden">
+            <canvas id="volume-chart" height="400"></canvas>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+// ── Chart instances (for cleanup) ──
+let oiStrikeChart = null;
+let pcrChart = null;
+let maxPainChart = null;
+let volumeChart = null;
+
+function fmt(n) { return n != null ? n.toLocaleString() : '-'; }
+
+// ── Load instruments on page load ──
+async function loadInstruments() {
+    try {
+        const res = await fetch('/api/analytics/instruments-with-data');
+        const data = await res.json();
+        const sel = document.getElementById('oi-instrument');
+        (data.instruments || []).forEach(inst => {
+            const opt = document.createElement('option');
+            opt.value = inst.instrument_key;
+            opt.textContent = inst.symbol;
+            sel.appendChild(opt);
+        });
+    } catch (e) {
+        console.error('Failed to load instruments:', e);
+    }
+}
+
+// ── Load expiry dates for selected instrument ──
+async function loadExpiryDates() {
+    const instrument = document.getElementById('oi-instrument').value;
+    const sel = document.getElementById('oi-expiry');
+    sel.innerHTML = '<option value="">Select Expiry</option>';
+    if (!instrument) return;
+
+    try {
+        const res = await fetch(`/api/analytics/expiry-dates?instrument=${encodeURIComponent(instrument)}`);
+        const data = await res.json();
+        (data.dates || []).forEach(d => {
+            const opt = document.createElement('option');
+            opt.value = d;
+            opt.textContent = d;
+            sel.appendChild(opt);
+        });
+    } catch (e) {
+        console.error('Failed to load expiry dates:', e);
+    }
+}
+
+// ── Helper: show/hide sections ──
+function showSection(prefix, state) {
+    const loading = document.getElementById(prefix + '-loading');
+    const empty = document.getElementById(prefix + '-empty');
+    const chart = document.getElementById(prefix + '-chart-container') || document.getElementById(prefix + '-container') || document.getElementById(prefix + '-result');
+    if (loading) loading.classList.toggle('hidden', state !== 'loading');
+    if (empty) empty.classList.toggle('hidden', state !== 'empty');
+    if (chart) chart.classList.toggle('hidden', state !== 'ready');
+}
+
+// ── Load all analytics data ──
+async function loadAllAnalytics() {
+    const instrument = document.getElementById('oi-instrument').value;
+    const expiry = document.getElementById('oi-expiry').value;
+    if (!instrument || !expiry) {
+        showToast('Please select both instrument and expiry date', 'warning');
+        return;
+    }
+
+    const params = `instrument=${encodeURIComponent(instrument)}&expiry=${encodeURIComponent(expiry)}`;
+
+    // Show all loading states
+    showSection('oi-strike', 'loading');
+    showSection('pcr', 'loading');
+    showSection('maxpain', 'loading');
+    showSection('heatmap', 'loading');
+    showSection('volume', 'loading');
+
+    // Fire all requests in parallel
+    const [oiRes, pcrRes, maxPainRes, heatmapRes, volumeRes] = await Promise.allSettled([
+        fetch(`/api/analytics/oi-strike?${params}`).then(r => r.json()),
+        fetch(`/api/analytics/pcr?${params}`).then(r => r.json()),
+        fetch(`/api/analytics/max-pain?${params}`).then(r => r.json()),
+        fetch(`/api/analytics/oi-heatmap?${params}`).then(r => r.json()),
+        fetch(`/api/analytics/volume-profile?${params}`).then(r => r.json()),
+    ]);
+
+    // Render each section
+    if (oiRes.status === 'fulfilled' && !oiRes.value.error) {
+        renderOiStrike(oiRes.value);
+    } else {
+        showSection('oi-strike', 'empty');
+    }
+
+    if (pcrRes.status === 'fulfilled' && !pcrRes.value.error) {
+        renderPcrTrend(pcrRes.value);
+    } else {
+        showSection('pcr', 'empty');
+    }
+
+    if (maxPainRes.status === 'fulfilled' && !maxPainRes.value.error) {
+        renderMaxPain(maxPainRes.value);
+    } else {
+        showSection('maxpain', 'empty');
+    }
+
+    if (heatmapRes.status === 'fulfilled' && !heatmapRes.value.error) {
+        renderHeatmap(heatmapRes.value);
+    } else {
+        showSection('heatmap', 'empty');
+    }
+
+    if (volumeRes.status === 'fulfilled' && !volumeRes.value.error) {
+        renderVolumeProfile(volumeRes.value);
+    } else {
+        showSection('volume', 'empty');
+    }
+}
+
+// ── 1. OI by Strike Chart ──
+function renderOiStrike(data) {
+    if (!data.strikes || data.strikes.length === 0) {
+        showSection('oi-strike', 'empty');
+        return;
+    }
+    showSection('oi-strike', 'ready');
+
+    if (oiStrikeChart) oiStrikeChart.destroy();
+    const ctx = document.getElementById('oi-strike-chart').getContext('2d');
+    oiStrikeChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: data.strikes,
+            datasets: [
+                {
+                    label: 'Call OI (CE)',
+                    data: data.ce_oi,
+                    backgroundColor: 'rgba(34, 197, 94, 0.7)',
+                    borderColor: 'rgba(34, 197, 94, 1)',
+                    borderWidth: 1,
+                },
+                {
+                    label: 'Put OI (PE)',
+                    data: data.pe_oi,
+                    backgroundColor: 'rgba(239, 68, 68, 0.7)',
+                    borderColor: 'rgba(239, 68, 68, 1)',
+                    borderWidth: 1,
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            interaction: { mode: 'index', intersect: false },
+            plugins: {
+                legend: { position: 'top' },
+                tooltip: {
+                    callbacks: {
+                        label: function(ctx) {
+                            return ctx.dataset.label + ': ' + ctx.raw.toLocaleString();
+                        }
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    title: { display: true, text: 'Strike Price' },
+                    ticks: { maxRotation: 45, autoSkip: true, maxTicksLimit: 30 }
+                },
+                y: {
+                    title: { display: true, text: 'Open Interest' },
+                    ticks: { callback: function(v) { return v.toLocaleString(); } }
+                }
+            }
+        }
+    });
+}
+
+// ── 2. PCR Trend Chart ──
+function renderPcrTrend(data) {
+    if (!data.dates || data.dates.length === 0) {
+        showSection('pcr', 'empty');
+        return;
+    }
+    showSection('pcr', 'ready');
+
+    if (pcrChart) pcrChart.destroy();
+    const ctx = document.getElementById('pcr-chart').getContext('2d');
+    pcrChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: data.dates,
+            datasets: [
+                {
+                    label: 'Put-Call Ratio',
+                    data: data.pcr,
+                    borderColor: 'rgba(99, 102, 241, 1)',
+                    backgroundColor: 'rgba(99, 102, 241, 0.1)',
+                    fill: true,
+                    tension: 0.3,
+                    pointRadius: 3,
+                    pointHoverRadius: 6,
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            plugins: {
+                legend: { position: 'top' },
+                tooltip: {
+                    callbacks: {
+                        label: function(ctx) {
+                            return 'PCR: ' + ctx.raw.toFixed(4);
+                        }
+                    }
+                },
+                annotation: undefined
+            },
+            scales: {
+                x: {
+                    title: { display: true, text: 'Trading Day' },
+                    ticks: { maxRotation: 45, autoSkip: true, maxTicksLimit: 20 }
+                },
+                y: {
+                    title: { display: true, text: 'PCR' },
+                    suggestedMin: 0,
+                }
+            }
+        }
+    });
+}
+
+// ── 3. Max Pain Chart ──
+function renderMaxPain(data) {
+    if (!data.strikes || data.strikes.length === 0) {
+        showSection('maxpain', 'empty');
+        return;
+    }
+    showSection('maxpain', 'ready');
+
+    document.getElementById('maxpain-value').textContent = data.max_pain_strike || '--';
+
+    if (maxPainChart) maxPainChart.destroy();
+    const ctx = document.getElementById('maxpain-chart').getContext('2d');
+
+    // Highlight max pain bar
+    const colors = data.strikes.map(s =>
+        s === data.max_pain_strike ? 'rgba(34, 197, 94, 0.9)' : 'rgba(156, 163, 175, 0.5)'
+    );
+    const borderColors = data.strikes.map(s =>
+        s === data.max_pain_strike ? 'rgba(34, 197, 94, 1)' : 'rgba(156, 163, 175, 0.8)'
+    );
+
+    maxPainChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: data.strikes,
+            datasets: [{
+                label: 'Total Pain (Writers Loss)',
+                data: data.pain,
+                backgroundColor: colors,
+                borderColor: borderColors,
+                borderWidth: 1,
+            }]
+        },
+        options: {
+            responsive: true,
+            plugins: {
+                legend: { position: 'top' },
+                tooltip: {
+                    callbacks: {
+                        label: function(ctx) {
+                            let label = 'Pain: ' + ctx.raw.toLocaleString();
+                            if (data.strikes[ctx.dataIndex] === data.max_pain_strike) {
+                                label += ' (MAX PAIN)';
+                            }
+                            return label;
+                        }
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    title: { display: true, text: 'Strike Price' },
+                    ticks: { maxRotation: 45, autoSkip: true, maxTicksLimit: 30 }
+                },
+                y: {
+                    title: { display: true, text: 'Total Pain Value' },
+                    ticks: { callback: function(v) { return v.toLocaleString(); } }
+                }
+            }
+        }
+    });
+}
+
+// ── 4. OI Change Heatmap ──
+function renderHeatmap(data) {
+    if (!data.dates || data.dates.length === 0 || !data.rows || data.rows.length === 0) {
+        showSection('heatmap', 'empty');
+        return;
+    }
+    showSection('heatmap', 'ready');
+
+    const thead = document.getElementById('heatmap-thead');
+    const tbody = document.getElementById('heatmap-tbody');
+
+    // Find max absolute change for color scaling
+    let maxAbs = 1;
+    data.rows.forEach(row => {
+        row.changes.forEach(v => {
+            if (v !== null && Math.abs(v) > maxAbs) maxAbs = Math.abs(v);
+        });
+    });
+
+    // Build header
+    let headerHtml = '<tr><th class="sticky left-0 bg-white z-10 text-xs">Strike</th><th class="text-xs">Type</th>';
+    data.dates.forEach(d => {
+        headerHtml += `<th class="text-xs text-center whitespace-nowrap">${d}</th>`;
+    });
+    headerHtml += '</tr>';
+    thead.innerHTML = headerHtml;
+
+    // Build body
+    let bodyHtml = '';
+    data.rows.forEach(row => {
+        bodyHtml += `<tr><td class="sticky left-0 bg-white z-10 font-medium text-xs whitespace-nowrap">${row.strike}</td>`;
+        bodyHtml += `<td class="text-xs font-medium ${row.type === 'CE' ? 'text-green-600' : 'text-red-600'}">${row.type}</td>`;
+        row.changes.forEach(v => {
+            if (v === null || v === 0) {
+                bodyHtml += '<td class="text-center text-xs text-gray-300">0</td>';
+            } else {
+                const intensity = Math.min(Math.abs(v) / maxAbs, 1);
+                const alpha = 0.15 + intensity * 0.65;
+                let bgColor;
+                if (v > 0) {
+                    bgColor = `rgba(34, 197, 94, ${alpha})`;
+                } else {
+                    bgColor = `rgba(239, 68, 68, ${alpha})`;
+                }
+                bodyHtml += `<td class="text-center text-xs font-medium" style="background-color: ${bgColor}" title="${v.toLocaleString()}">${abbreviateNumber(v)}</td>`;
+            }
+        });
+        bodyHtml += '</tr>';
+    });
+    tbody.innerHTML = bodyHtml;
+}
+
+function abbreviateNumber(n) {
+    if (n === null || n === undefined) return '-';
+    const abs = Math.abs(n);
+    const sign = n < 0 ? '-' : '+';
+    if (abs >= 1e7) return sign + (abs / 1e7).toFixed(1) + 'Cr';
+    if (abs >= 1e5) return sign + (abs / 1e5).toFixed(1) + 'L';
+    if (abs >= 1e3) return sign + (abs / 1e3).toFixed(1) + 'K';
+    return (n > 0 ? '+' : '') + n.toLocaleString();
+}
+
+// ── 5. Volume Profile Chart ──
+function renderVolumeProfile(data) {
+    if (!data.strikes || data.strikes.length === 0) {
+        showSection('volume', 'empty');
+        return;
+    }
+    showSection('volume', 'ready');
+
+    if (volumeChart) volumeChart.destroy();
+    const ctx = document.getElementById('volume-chart').getContext('2d');
+    volumeChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: data.strikes,
+            datasets: [
+                {
+                    label: 'Call Volume (CE)',
+                    data: data.ce_volume,
+                    backgroundColor: 'rgba(34, 197, 94, 0.6)',
+                    borderColor: 'rgba(34, 197, 94, 1)',
+                    borderWidth: 1,
+                },
+                {
+                    label: 'Put Volume (PE)',
+                    data: data.pe_volume,
+                    backgroundColor: 'rgba(239, 68, 68, 0.6)',
+                    borderColor: 'rgba(239, 68, 68, 1)',
+                    borderWidth: 1,
+                }
+            ]
+        },
+        options: {
+            indexAxis: 'y',
+            responsive: true,
+            interaction: { mode: 'index', intersect: false },
+            plugins: {
+                legend: { position: 'top' },
+                tooltip: {
+                    callbacks: {
+                        label: function(ctx) {
+                            return ctx.dataset.label + ': ' + ctx.raw.toLocaleString();
+                        }
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    title: { display: true, text: 'Volume' },
+                    ticks: { callback: function(v) { return v.toLocaleString(); } },
+                    stacked: false,
+                },
+                y: {
+                    title: { display: true, text: 'Strike Price' },
+                    stacked: false,
+                    ticks: { autoSkip: true, maxTicksLimit: 40 }
+                }
+            }
+        }
+    });
+}
+
+// ── Initialize ──
+document.addEventListener('DOMContentLoaded', loadInstruments);
+</script>
+{% endblock %}

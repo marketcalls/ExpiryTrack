@@ -3,12 +3,14 @@ Export historical data using OpenAlgo symbols
 Supports exporting to CSV, Excel, and JSON formats
 """
 
-import sqlite3
+import duckdb
 import pandas as pd
 import json
 from pathlib import Path
 from datetime import datetime
 import argparse
+
+from src.config import config
 
 def export_by_openalgo_symbol(symbol, format='csv', output_dir='exports'):
     """
@@ -23,7 +25,7 @@ def export_by_openalgo_symbol(symbol, format='csv', output_dir='exports'):
     Path(output_dir).mkdir(exist_ok=True)
 
     # Connect to database
-    conn = sqlite3.connect('data/expirytrack.db')
+    conn = duckdb.connect(str(config.DB_PATH), read_only=True)
 
     try:
         # Query to get contract details and historical data
@@ -40,7 +42,7 @@ def export_by_openalgo_symbol(symbol, format='csv', output_dir='exports'):
             h.low,
             h.close,
             h.volume,
-            h.open_interest
+            h.oi
         FROM contracts c
         JOIN historical_data h ON c.expired_instrument_key = h.expired_instrument_key
         WHERE c.openalgo_symbol = ?
@@ -48,7 +50,7 @@ def export_by_openalgo_symbol(symbol, format='csv', output_dir='exports'):
         """
 
         # Load data into DataFrame
-        df = pd.read_sql_query(query, conn, params=[symbol])
+        df = conn.execute(query, [symbol]).fetchdf()
 
         if df.empty:
             print(f"No data found for symbol: {symbol}")
@@ -65,7 +67,7 @@ def export_by_openalgo_symbol(symbol, format='csv', output_dir='exports'):
             'trading_symbol': df['trading_symbol'].iloc[0],
             'strike_price': df['strike_price'].iloc[0] if pd.notna(df['strike_price'].iloc[0]) else None,
             'contract_type': df['contract_type'].iloc[0],
-            'expiry_date': df['expiry_date'].iloc[0],
+            'expiry_date': str(df['expiry_date'].iloc[0]),
             'data_points': len(df)
         }
 
@@ -78,7 +80,7 @@ def export_by_openalgo_symbol(symbol, format='csv', output_dir='exports'):
         print(f"Total Data Points: {contract_info['data_points']}")
 
         # Prepare data for export (remove duplicate contract info columns)
-        export_df = df[['timestamp', 'open', 'high', 'low', 'close', 'volume', 'open_interest']].copy()
+        export_df = df[['timestamp', 'open', 'high', 'low', 'close', 'volume', 'oi']].copy()
 
         # Generate filename
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -143,19 +145,20 @@ def export_multiple_symbols(symbols, format='csv', output_dir='exports'):
 
 def search_and_export(pattern, format='csv', output_dir='exports', auto_confirm=False):
     """Search for symbols matching pattern and export them"""
-    conn = sqlite3.connect('data/expirytrack.db')
-    cursor = conn.cursor()
+    conn = duckdb.connect(str(config.DB_PATH), read_only=True)
 
-    # Search for matching symbols
-    cursor.execute("""
-        SELECT DISTINCT openalgo_symbol
-        FROM contracts
-        WHERE openalgo_symbol LIKE ?
-        ORDER BY openalgo_symbol
-    """, [f"%{pattern}%"])
+    try:
+        # Search for matching symbols
+        result = conn.execute("""
+            SELECT DISTINCT openalgo_symbol
+            FROM contracts
+            WHERE openalgo_symbol LIKE ?
+            ORDER BY openalgo_symbol
+        """, [f"%{pattern}%"]).fetchall()
 
-    symbols = [row[0] for row in cursor.fetchall()]
-    conn.close()
+        symbols = [row[0] for row in result]
+    finally:
+        conn.close()
 
     if not symbols:
         print(f"No symbols found matching pattern: {pattern}")

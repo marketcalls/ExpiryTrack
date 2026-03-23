@@ -1,13 +1,15 @@
 """
 Logging configuration for ExpiryTrack
 """
+
 import logging
 import sys
-from pathlib import Path
 from datetime import datetime
 
 from loguru import logger
+
 from ..config import config
+
 
 def setup_logging():
     """Configure application logging"""
@@ -27,7 +29,7 @@ def setup_logging():
         level=config.LOG_LEVEL,
         format="{time:YYYY-MM-DD HH:mm:ss} | {level} | {module}:{function}:{line} - {message}",
         backtrace=True,
-        diagnose=True
+        diagnose=False,
     )
 
     # Add console handler with color
@@ -35,7 +37,7 @@ def setup_logging():
         sys.stdout,
         level=config.LOG_LEVEL,
         format="<green>{time:HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{module}</cyan> - <level>{message}</level>",
-        colorize=True
+        colorize=True,
     )
 
     # Configure standard logging to use loguru
@@ -53,9 +55,7 @@ def setup_logging():
                 frame = frame.f_back
                 depth += 1
 
-            logger.opt(depth=depth, exception=record.exc_info).log(
-                level, record.getMessage()
-            )
+            logger.opt(depth=depth, exception=record.exc_info).log(level, record.getMessage())
 
     # Replace standard logging with loguru
     logging.basicConfig(handlers=[InterceptHandler()], level=0)

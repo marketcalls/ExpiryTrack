@@ -1,0 +1,483 @@
+{% extends "base.html" %}
+
+{% block title %}Expiry Comparison - ExpiryTrack{% endblock %}
+
+{% block content %}
+<div class="max-w-7xl mx-auto">
+    <div class="flex items-center justify-between mb-6">
+        <h1 class="text-3xl font-bold supabase-text-gradient">Comparative Expiry Analysis</h1>
+    </div>
+
+    <!-- Filters -->
+    <div class="card-minimal p-4 mb-6">
+        <div class="flex flex-wrap items-end gap-4">
+            <div>
+                <label class="text-sm text-gray-500 font-medium block mb-1">Instrument</label>
+                <select id="cmp-instrument" onchange="loadExpiryDates()" class="select select-bordered select-sm w-56">
+                    <option value="">Select Instrument</option>
+                </select>
+            </div>
+            <div class="flex-1 min-w-[200px]">
+                <label class="text-sm text-gray-500 font-medium block mb-1">Expiry Dates (select 2-5)</label>
+                <div id="expiry-checkboxes" class="flex flex-wrap gap-2 items-center min-h-[32px]">
+                    <span class="text-sm text-gray-400">Select an instrument first</span>
+                </div>
+            </div>
+            <button onclick="loadComparison()" class="btn-supabase text-sm">Compare</button>
+        </div>
+    </div>
+
+    <!-- Volume Bar Chart -->
+    <div class="card-minimal p-6 mb-6">
+        <h2 class="text-xl font-bold text-gray-800 mb-4">Volume Comparison</h2>
+        <p class="text-sm text-gray-500 mb-4">Total traded volume for each selected expiry date</p>
+        <div id="volume-loading" class="hidden flex justify-center py-8">
+            <span class="loading loading-spinner loading-md text-success"></span>
+            <span class="ml-2 text-gray-500">Loading volume data...</span>
+        </div>
+        <div id="volume-empty" class="text-center py-8 text-gray-400">
+            Select an instrument and 2-5 expiry dates, then click Compare
+        </div>
+        <div id="volume-chart-container" class="hidden">
+            <canvas id="volume-chart" height="280"></canvas>
+        </div>
+    </div>
+
+    <!-- Metrics Line Chart -->
+    <div class="card-minimal p-6 mb-6">
+        <h2 class="text-xl font-bold text-gray-800 mb-4">Metrics Overlay</h2>
+        <p class="text-sm text-gray-500 mb-4">Key metrics side-by-side across expiries: trading days, active strikes, and candle count</p>
+        <div id="metrics-loading" class="hidden flex justify-center py-8">
+            <span class="loading loading-spinner loading-md text-success"></span>
+            <span class="ml-2 text-gray-500">Loading metrics...</span>
+        </div>
+        <div id="metrics-empty" class="text-center py-8 text-gray-400">
+            Select an instrument and 2-5 expiry dates, then click Compare
+        </div>
+        <div id="metrics-chart-container" class="hidden">
+            <canvas id="metrics-chart" height="280"></canvas>
+        </div>
+    </div>
+
+    <!-- Radar Chart -->
+    <div class="card-minimal p-6 mb-6">
+        <h2 class="text-xl font-bold text-gray-800 mb-4">Normalized Comparison</h2>
+        <p class="text-sm text-gray-500 mb-4">All metrics normalized to 0-100 scale for relative comparison across expiries</p>
+        <div id="radar-loading" class="hidden flex justify-center py-8">
+            <span class="loading loading-spinner loading-md text-success"></span>
+            <span class="ml-2 text-gray-500">Loading radar chart...</span>
+        </div>
+        <div id="radar-empty" class="text-center py-8 text-gray-400">
+            Select an instrument and 2-5 expiry dates, then click Compare
+        </div>
+        <div id="radar-chart-container" class="hidden flex justify-center">
+            <div class="w-full max-w-2xl">
+                <canvas id="radar-chart" height="350"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <!-- Summary Table -->
+    <div class="card-minimal p-6 mb-6">
+        <h2 class="text-xl font-bold text-gray-800 mb-4">Summary Table</h2>
+        <p class="text-sm text-gray-500 mb-4">All metrics side-by-side for easy comparison</p>
+        <div id="table-loading" class="hidden flex justify-center py-8">
+            <span class="loading loading-spinner loading-md text-success"></span>
+            <span class="ml-2 text-gray-500">Loading summary...</span>
+        </div>
+        <div id="table-empty" class="text-center py-8 text-gray-400">
+            Select an instrument and 2-5 expiry dates, then click Compare
+        </div>
+        <div id="table-container" class="hidden overflow-x-auto">
+            <table class="table table-zebra w-full" id="summary-table">
+                <thead id="summary-thead"></thead>
+                <tbody id="summary-tbody"></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+// ── Chart instances (for cleanup) ──
+let volumeChart = null;
+let metricsChart = null;
+let radarChart = null;
+
+// ── Color palette for expiry series ──
+const COLORS = [
+    { bg: 'rgba(62, 207, 142, 0.7)', border: 'rgba(62, 207, 142, 1)', bgLight: 'rgba(62, 207, 142, 0.2)' },
+    { bg: 'rgba(99, 102, 241, 0.7)', border: 'rgba(99, 102, 241, 1)', bgLight: 'rgba(99, 102, 241, 0.2)' },
+    { bg: 'rgba(239, 68, 68, 0.7)', border: 'rgba(239, 68, 68, 1)', bgLight: 'rgba(239, 68, 68, 0.2)' },
+    { bg: 'rgba(245, 158, 11, 0.7)', border: 'rgba(245, 158, 11, 1)', bgLight: 'rgba(245, 158, 11, 0.2)' },
+    { bg: 'rgba(139, 92, 246, 0.7)', border: 'rgba(139, 92, 246, 1)', bgLight: 'rgba(139, 92, 246, 0.2)' },
+];
+
+function fmt(n) { return n != null ? n.toLocaleString() : '-'; }
+
+// ── Load instruments on page load ──
+async function loadInstruments() {
+    try {
+        const res = await fetch('/api/analytics/instruments-with-data');
+        const data = await res.json();
+        const sel = document.getElementById('cmp-instrument');
+        (data.instruments || []).forEach(inst => {
+            const opt = document.createElement('option');
+            opt.value = inst.instrument_key;
+            opt.textContent = inst.symbol;
+            sel.appendChild(opt);
+        });
+    } catch (e) {
+        console.error('Failed to load instruments:', e);
+    }
+}
+
+// ── Load expiry dates for selected instrument ──
+async function loadExpiryDates() {
+    const instrument = document.getElementById('cmp-instrument').value;
+    const container = document.getElementById('expiry-checkboxes');
+    container.innerHTML = '';
+    if (!instrument) {
+        container.innerHTML = '<span class="text-sm text-gray-400">Select an instrument first</span>';
+        return;
+    }
+
+    try {
+        const res = await fetch(`/api/analytics/expiry-dates?instrument=${encodeURIComponent(instrument)}`);
+        const data = await res.json();
+        const dates = data.dates || [];
+        if (dates.length === 0) {
+            container.innerHTML = '<span class="text-sm text-gray-400">No expiry dates available</span>';
+            return;
+        }
+        dates.forEach(d => {
+            const label = document.createElement('label');
+            label.className = 'flex items-center gap-1 cursor-pointer bg-gray-50 border border-gray-200 rounded-lg px-3 py-1 hover:border-green-400 transition-colors text-sm';
+            label.innerHTML = `<input type="checkbox" class="checkbox checkbox-xs checkbox-success expiry-cb" value="${d}"> ${d}`;
+            container.appendChild(label);
+        });
+    } catch (e) {
+        console.error('Failed to load expiry dates:', e);
+        container.innerHTML = '<span class="text-sm text-red-400">Failed to load expiry dates</span>';
+    }
+}
+
+// ── Get selected expiry dates ──
+function getSelectedExpiries() {
+    const checks = document.querySelectorAll('.expiry-cb:checked');
+    return Array.from(checks).map(cb => cb.value);
+}
+
+// ── Helper: show/hide sections ──
+function showSection(prefix, state) {
+    const loading = document.getElementById(prefix + '-loading');
+    const empty = document.getElementById(prefix + '-empty');
+    const chart = document.getElementById(prefix + '-chart-container') || document.getElementById(prefix + '-container');
+    if (loading) loading.classList.toggle('hidden', state !== 'loading');
+    if (empty) empty.classList.toggle('hidden', state !== 'empty');
+    if (chart) chart.classList.toggle('hidden', state !== 'ready');
+}
+
+// ── Load comparison data ──
+async function loadComparison() {
+    const instrument = document.getElementById('cmp-instrument').value;
+    const expiries = getSelectedExpiries();
+
+    if (!instrument) {
+        showToast('Please select an instrument', 'warning');
+        return;
+    }
+    if (expiries.length < 2) {
+        showToast('Please select at least 2 expiry dates', 'warning');
+        return;
+    }
+    if (expiries.length > 5) {
+        showToast('Please select at most 5 expiry dates', 'warning');
+        return;
+    }
+
+    // Show all loading states
+    showSection('volume', 'loading');
+    showSection('metrics', 'loading');
+    showSection('radar', 'loading');
+    showSection('table', 'loading');
+
+    try {
+        const params = `instrument=${encodeURIComponent(instrument)}&expiries=${encodeURIComponent(expiries.join(','))}`;
+        const res = await fetch(`/api/analytics/expiry-comparison?${params}`);
+        const data = await res.json();
+
+        if (data.error) {
+            showToast(data.error, 'error');
+            showSection('volume', 'empty');
+            showSection('metrics', 'empty');
+            showSection('radar', 'empty');
+            showSection('table', 'empty');
+            return;
+        }
+
+        const comparison = data.comparison || {};
+        const sortedExpiries = Object.keys(comparison).sort();
+
+        if (sortedExpiries.length === 0) {
+            showSection('volume', 'empty');
+            showSection('metrics', 'empty');
+            showSection('radar', 'empty');
+            showSection('table', 'empty');
+            showToast('No data found for the selected expiries', 'warning');
+            return;
+        }
+
+        renderVolumeChart(sortedExpiries, comparison);
+        renderMetricsChart(sortedExpiries, comparison);
+        renderRadarChart(sortedExpiries, comparison);
+        renderSummaryTable(sortedExpiries, comparison);
+    } catch (e) {
+        console.error('Failed to load comparison:', e);
+        showToast('Failed to load comparison data', 'error');
+        showSection('volume', 'empty');
+        showSection('metrics', 'empty');
+        showSection('radar', 'empty');
+        showSection('table', 'empty');
+    }
+}
+
+// ── 1. Grouped Bar Chart: Volume per Expiry ──
+function renderVolumeChart(expiries, comparison) {
+    showSection('volume', 'ready');
+
+    if (volumeChart) volumeChart.destroy();
+    const ctx = document.getElementById('volume-chart').getContext('2d');
+
+    const datasets = [{
+        label: 'Total Volume',
+        data: expiries.map(e => comparison[e].total_volume),
+        backgroundColor: expiries.map((_, i) => COLORS[i % COLORS.length].bg),
+        borderColor: expiries.map((_, i) => COLORS[i % COLORS.length].border),
+        borderWidth: 1,
+    }];
+
+    volumeChart = new Chart(ctx, {
+        type: 'bar',
+        data: { labels: expiries, datasets: datasets },
+        options: {
+            responsive: true,
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    callbacks: {
+                        label: function(ctx) {
+                            return 'Volume: ' + ctx.raw.toLocaleString();
+                        }
+                    }
+                }
+            },
+            scales: {
+                x: { title: { display: true, text: 'Expiry Date' } },
+                y: {
+                    title: { display: true, text: 'Total Volume' },
+                    ticks: { callback: function(v) { return v.toLocaleString(); } }
+                }
+            }
+        }
+    });
+}
+
+// ── 2. Line Chart: Overlaid Metrics ──
+function renderMetricsChart(expiries, comparison) {
+    showSection('metrics', 'ready');
+
+    if (metricsChart) metricsChart.destroy();
+    const ctx = document.getElementById('metrics-chart').getContext('2d');
+
+    const datasets = [
+        {
+            label: 'Trading Days',
+            data: expiries.map(e => comparison[e].trading_days),
+            borderColor: COLORS[0].border,
+            backgroundColor: COLORS[0].bgLight,
+            fill: false,
+            tension: 0.3,
+            pointRadius: 5,
+            pointHoverRadius: 8,
+            yAxisID: 'y',
+        },
+        {
+            label: 'Active Strikes',
+            data: expiries.map(e => comparison[e].active_strikes),
+            borderColor: COLORS[1].border,
+            backgroundColor: COLORS[1].bgLight,
+            fill: false,
+            tension: 0.3,
+            pointRadius: 5,
+            pointHoverRadius: 8,
+            yAxisID: 'y',
+        },
+        {
+            label: 'Candle Count',
+            data: expiries.map(e => comparison[e].candle_count),
+            borderColor: COLORS[2].border,
+            backgroundColor: COLORS[2].bgLight,
+            fill: false,
+            tension: 0.3,
+            pointRadius: 5,
+            pointHoverRadius: 8,
+            yAxisID: 'y1',
+        },
+    ];
+
+    metricsChart = new Chart(ctx, {
+        type: 'line',
+        data: { labels: expiries, datasets: datasets },
+        options: {
+            responsive: true,
+            interaction: { mode: 'index', intersect: false },
+            plugins: {
+                legend: { position: 'top' },
+                tooltip: {
+                    callbacks: {
+                        label: function(ctx) {
+                            return ctx.dataset.label + ': ' + ctx.raw.toLocaleString();
+                        }
+                    }
+                }
+            },
+            scales: {
+                x: { title: { display: true, text: 'Expiry Date' } },
+                y: {
+                    type: 'linear',
+                    display: true,
+                    position: 'left',
+                    title: { display: true, text: 'Trading Days / Active Strikes' },
+                },
+                y1: {
+                    type: 'linear',
+                    display: true,
+                    position: 'right',
+                    title: { display: true, text: 'Candle Count' },
+                    grid: { drawOnChartArea: false },
+                    ticks: { callback: function(v) { return v.toLocaleString(); } }
+                }
+            }
+        }
+    });
+}
+
+// ── 3. Radar Chart: Normalized Metrics ──
+function renderRadarChart(expiries, comparison) {
+    showSection('radar', 'ready');
+
+    if (radarChart) radarChart.destroy();
+    const ctx = document.getElementById('radar-chart').getContext('2d');
+
+    const metricKeys = ['total_volume', 'avg_spread', 'active_strikes', 'oi_concentration', 'trading_days', 'candle_count'];
+    const metricLabels = ['Volume', 'Avg Spread', 'Active Strikes', 'OI Concentration', 'Trading Days', 'Candles'];
+
+    // Find max for each metric (for normalization to 0-100)
+    const maxValues = {};
+    metricKeys.forEach(key => {
+        maxValues[key] = Math.max(...expiries.map(e => comparison[e][key] || 0), 1);
+    });
+
+    const datasets = expiries.map((expiry, i) => {
+        const color = COLORS[i % COLORS.length];
+        return {
+            label: expiry,
+            data: metricKeys.map(key => {
+                const raw = comparison[expiry][key] || 0;
+                return Math.round(raw / maxValues[key] * 100);
+            }),
+            backgroundColor: color.bgLight,
+            borderColor: color.border,
+            borderWidth: 2,
+            pointBackgroundColor: color.border,
+            pointBorderColor: '#fff',
+            pointHoverBackgroundColor: '#fff',
+            pointHoverBorderColor: color.border,
+        };
+    });
+
+    radarChart = new Chart(ctx, {
+        type: 'radar',
+        data: { labels: metricLabels, datasets: datasets },
+        options: {
+            responsive: true,
+            plugins: {
+                legend: { position: 'top' },
+                tooltip: {
+                    callbacks: {
+                        label: function(ctx) {
+                            const expiry = ctx.dataset.label;
+                            const metricKey = metricKeys[ctx.dataIndex];
+                            const rawValue = comparison[expiry][metricKey];
+                            const metricLabel = metricLabels[ctx.dataIndex];
+                            if (metricKey === 'oi_concentration') {
+                                return expiry + ' - ' + metricLabel + ': ' + rawValue + '%';
+                            }
+                            return expiry + ' - ' + metricLabel + ': ' + fmt(rawValue);
+                        }
+                    }
+                }
+            },
+            scales: {
+                r: {
+                    beginAtZero: true,
+                    max: 100,
+                    ticks: { stepSize: 20, display: true },
+                    pointLabels: { font: { size: 12 } }
+                }
+            }
+        }
+    });
+}
+
+// ── 4. Summary Table ──
+function renderSummaryTable(expiries, comparison) {
+    showSection('table', 'ready');
+
+    const thead = document.getElementById('summary-thead');
+    const tbody = document.getElementById('summary-tbody');
+
+    // Build header
+    let headerHtml = '<tr><th class="text-sm font-semibold">Metric</th>';
+    expiries.forEach((e, i) => {
+        const color = COLORS[i % COLORS.length].border;
+        headerHtml += `<th class="text-sm font-semibold text-center"><span style="color:${color}">${e}</span></th>`;
+    });
+    headerHtml += '</tr>';
+    thead.innerHTML = headerHtml;
+
+    // Build rows
+    const metrics = [
+        { key: 'total_volume', label: 'Total Volume', format: v => fmt(v) },
+        { key: 'avg_spread', label: 'Avg Spread (H-L)', format: v => v != null ? v.toFixed(2) : '-' },
+        { key: 'active_strikes', label: 'Active Strikes', format: v => fmt(v) },
+        { key: 'oi_concentration', label: 'OI Concentration (Top 5)', format: v => v != null ? v + '%' : '-' },
+        { key: 'trading_days', label: 'Trading Days', format: v => fmt(v) },
+        { key: 'candle_count', label: 'Candle Count', format: v => fmt(v) },
+    ];
+
+    let bodyHtml = '';
+    metrics.forEach(metric => {
+        // Find the max value for highlighting
+        const values = expiries.map(e => comparison[e][metric.key] || 0);
+        const maxVal = Math.max(...values);
+
+        bodyHtml += `<tr><td class="text-sm font-medium">${metric.label}</td>`;
+        expiries.forEach(e => {
+            const val = comparison[e][metric.key];
+            const isMax = val === maxVal && maxVal > 0;
+            const cellClass = isMax ? 'font-bold text-green-600' : '';
+            bodyHtml += `<td class="text-sm text-center ${cellClass}">${metric.format(val)}</td>`;
+        });
+        bodyHtml += '</tr>';
+    });
+    tbody.innerHTML = bodyHtml;
+}
+
+// ── Initialize ──
+document.addEventListener('DOMContentLoaded', loadInstruments);
+</script>
+{% endblock %}

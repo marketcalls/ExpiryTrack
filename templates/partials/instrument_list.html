@@ -1,0 +1,36 @@
+{# Partial: Instrument list grouped by category — rendered server-side for htmx. #}
+{% if not instruments %}
+<div class="text-center text-gray-400 py-4">No instruments configured</div>
+{% else %}
+{% for cat, items in grouped.items() %}
+<div class="mb-3">
+    <div class="flex items-center justify-between mb-1">
+        {% set colors = {'Index': 'green', 'Stock F&O': 'blue', 'Commodity': 'amber', 'BSE F&O': 'purple'} %}
+        <span class="text-xs font-semibold text-{{ colors.get(cat, 'gray') }}-600 uppercase tracking-wider">{{ cat }} ({{ items|length }})</span>
+    </div>
+    {% for inst in items %}
+    <div class="flex items-center justify-between p-2 border border-gray-200 rounded-lg mb-1" id="instrument-row-{{ inst.id }}">
+        <div>
+            <span class="font-medium text-sm">{{ inst.symbol }}</span>
+            <span class="text-xs text-gray-400 ml-1">{{ inst.instrument_key }}</span>
+        </div>
+        <div class="flex items-center gap-2">
+            <label class="cursor-pointer label">
+                <input type="checkbox" class="toggle toggle-sm toggle-success"
+                       {{ 'checked' if inst.is_active else '' }}
+                       hx-patch="/api/instruments/{{ inst.id }}"
+                       hx-vals='{"is_active": {{ "false" if inst.is_active else "true" }}}'
+                       hx-swap="none">
+            </label>
+            <button hx-delete="/api/instruments/{{ inst.id }}"
+                    hx-target="#instruments-list"
+                    hx-swap="innerHTML"
+                    hx-confirm="Remove this instrument?"
+                    class="btn btn-ghost btn-xs text-red-500"
+                    title="Remove">&times;</button>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% endfor %}
+{% endif %}

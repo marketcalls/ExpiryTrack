@@ -3,9 +3,10 @@ Script to update existing OpenAlgo symbols in the database
 Fixes the incorrectly formatted symbols to use the proper format
 """
 
-import sqlite3
 import json
+from src.database.manager import DatabaseManager, DictCursor
 from src.utils.openalgo_symbol import to_openalgo_symbol
+
 
 def update_existing_symbols():
     """Update all existing OpenAlgo symbols in the database"""
@@ -13,11 +14,11 @@ def update_existing_symbols():
     print("Updating OpenAlgo Symbols in Database")
     print("="*70)
 
-    # Connect to database
-    conn = sqlite3.connect('data/expirytrack.db')
-    cursor = conn.cursor()
+    db = DatabaseManager()
 
-    try:
+    with db.get_connection() as conn:
+        cursor = DictCursor(conn.cursor())
+
         # Get all contracts with their metadata
         cursor.execute("SELECT expired_instrument_key, metadata FROM contracts")
         contracts = cursor.fetchall()
@@ -25,7 +26,9 @@ def update_existing_symbols():
         print(f"\nFound {len(contracts)} contracts to update")
 
         updates = []
-        for expired_key, metadata_json in contracts:
+        for row in contracts:
+            expired_key = row[0]
+            metadata_json = row[1]
             if metadata_json:
                 try:
                     # Parse the contract metadata
@@ -44,10 +47,11 @@ def update_existing_symbols():
         # Update all symbols
         if updates:
             print(f"\nUpdating {len(updates)} symbols...")
-            cursor.executemany(
-                "UPDATE contracts SET openalgo_symbol = ? WHERE expired_instrument_key = ?",
-                updates
-            )
+            for openalgo_symbol, expired_key in updates:
+                cursor.execute(
+                    "UPDATE contracts SET openalgo_symbol = ? WHERE expired_instrument_key = ?",
+                    (openalgo_symbol, expired_key)
+                )
             conn.commit()
             print(f"Successfully updated {len(updates)} symbols")
 
@@ -59,18 +63,16 @@ def update_existing_symbols():
                 LIMIT 10
             """)
 
-            for trading_symbol, openalgo_symbol in cursor.fetchall():
-                print(f"  {trading_symbol:40} -> {openalgo_symbol}")
+            for row in cursor.fetchall():
+                print(f"  {str(row[0]):40} -> {row[1]}")
 
         else:
             print("No symbols to update")
 
-    finally:
-        conn.close()
-
     print("\n" + "="*70)
     print("Update Complete!")
     print("="*70)
+
 
 if __name__ == "__main__":
     update_existing_symbols()

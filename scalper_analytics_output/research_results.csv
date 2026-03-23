@@ -1,0 +1,84 @@
+Question_ID,Title,Result,Detail
+1,Average gap (pts / %),+15.9 pts / +0.074%,Median: +22.7 pts | Gap-up: 61.8% | Gap-down: 38.0% | Flat (<5pts): 6.7%
+2,Gap >0.7%: Run vs Fade,Run 32.7% / Fade 67.3%,n=52 days with gap >0.7%
+3,Open = Day High or Low,Exact: High 2.7% / Low 1.7%,Near (5%): High 11.5% / Low 5.9%
+4,Gap-up filled in 60 mins,53.0%,n=443 gap-up days analysed
+5,After gap fill: reversal at PDC,46.8%,n=235 filled days
+6,Flat open (<0.1%) day range,Avg range 194 pts vs 211 pts (non-flat),n=181 flat days
+7,Gap-and-Go: Expiry vs Non-expiry,Expiry 82.1% / Non-expiry 83.6%,Expiry n=149 | Non-expiry n=599
+8,Avg time to fill 50-pt gap (mins),86 mins,n=173 events | median 33 mins
+9,Gap-down Friday → short covering by 3pm,44.6%,n=65 gap-down Fridays
+10,Open > PDH: Odds of touching PDC,51.0%,n=196 gap-above-PDH days
+11,Highest avg range window,W1,W1=142.5 W2=92.8 W3=104.6 pts
+13,Day High formed in W3,36.3%,n=749 days
+14,Day Low formed in W1,52.1%,n=748 days
+15,W3 reverses W1 trend,49.1%,n=748 days
+17,W1+W2 inside → W3 breakout,59.1%,n=237 inside days
+18,Lunch hour (12:00-13:30) avg range,78.0 pts,Median 61.2 pts | Max 846.0 pts
+19,Trend from 1:30 continues to 3:30,83.4%,n=748 days
+20,Trending W1 → mean-reverting W2,42.9%,n=436 trending-W1 days
+21,Current ADR (5/10/20-day),5d=345  10d=335  20d=295 pts,Based on last available day in dataset
+22,Hits 80% ADR by 11am → reversal,nan%,n=0 events
+24,Expansion ratio (range / 5-day ADR),Avg=1.01x | Median=0.96x,>1.5x on 70 days | <0.5x on 36 days
+25,Days/month exceeding 1.5x ADR,Avg 1.8 days/month,Max 5 | Min 0
+26,15-min range >40pts → Trend Day,85.0%,n=694 days with big 15-min opening
+27,Neutral Day (stays in 1st hour H/L),35.6%,n=748 days
+28,Small range day → Big range tomorrow,22.2%,n=36 small days | 8 followed by big
+29,Nifty vs BankNifty range correlation,r=0.830 (p=0.0000),n=749 common days
+30,ADR on event weeks (RBI/Budget),Requires external event calendar,Add event_dates list to CONFIG to enable this check
+31,Support found at PDL,30.6% of times PDL tested,PDL tested 444 days | held 136 times
+32,PDH breakout holds >30 mins,79.5%,n=404 PDH breakout days
+33,Inside Day → last hour breakout,0.0%,n=81 inside days
+34,Trend Day Up → gap-down tomorrow,25.7%,n=268 trend-up days
+35,Price touches T-1 VAH/VAL (70%/30% approx),VAH 50.9% | VAL 52.0%,Note: using price-based approximation (no volume profile)
+36,Close near High → gap-up tomorrow,64.9%,n=194 days closing near high
+37,Within 100pts of PDH: breakout rate,75.8%,n=450 days
+38,Mean reversion to T-1 midpoint,53.3% of days touch T-1 mid,T-1 midpoint = (PDH+PDL)/2
+39,Hammer → bullish W1 tomorrow,41.5%,n=147 hammer days
+40,1st hour stays within T-1 range,28.4%,n=747 days
+41,Bounce rate at 500-pt round numbers,41.5%,n=248 touches
+42,Avg overshoot at 100-pt round levels,16.4 pts,n=733 level touches
+43,TWAP crossovers per day,Trend=16.0 | Sideways=20.5,Trend n=635 | Sideways n=114
+44,Max distance from TWAP (sideways day),87.4 pts avg,Median 80.1 pts | n=114
+45,First 5-min High breakout success rate,83.6%,n=579 breakout events
+46,First 15-min Low breakdown success rate,85.2%,n=559 breakdown events
+47,Supertrend (1-min) flips per day,Trend day=0.0 | Other=0.0,Trend n=635 | Other n=114
+48,Red candle after 3 green 5-min candles,51.6%,n=6654 occurrences of 3 consecutive green
+49,Avg consolidation bars before 20-pt move,~10 mins,n=649 events
+50,Avg MAE after 5-min breakout entry,45.8 pts against you,n=579 | p75=62.4 pts
+51,Monday reverses Friday direction,50.3%,n=147 Mondays
+52,Highest volume day of week,Mon (Thu vol index: nan% of avg),"{'Mon': '0', 'Tue': '0', 'Wed': '0', 'Thu': '0', 'Fri': '0'}"
+53,Avg range: Friday vs Monday,Fri=220.6 pts | Mon=198.0 pts,All-day avg by DOW: Mon=198.0 | Tue=206.8 | Wed=193.6 | Thu=215.4 | Fri=220.6
+54,Tuesday follows Monday direction,43.8%,n=153
+55,Wednesday W3 volatility vs other days,Wed W3=104.7 pts | Others=104.6 pts,Wed W3 is 100% of other-day W3
+56,Avg wick vs body (1-min),Body=4.60 | Upper wick=1.85 | Lower wick=1.93,Total wick / body ratio = 0.82x | Avg candle range = 8.38
+57,Avg doji (1-min) before trend change,2.30 dojis per reversal event,n=28989 reversals analysed
+58,Avg volume: breakout bars vs normal bars,N/A,"Breakout n=150,604"
+59,False breakout rate of 15-min H/L,48.6%,n=743 breakout events
+60,Avg velocity of fast moves (>20pt/bar),45.7 pts/min,n=5304 fast-move bars
+66,USDINR vs Nifty correlation,Requires external USDINR data,
+67,Dow Futures trigger Nifty trend,Requires external Dow futures data,
+72,After 50pt straight move → 20pt retracement,21.9%,n=699 events
+73,EMA(20) touches on 1-min (trend vs other),Trend=53.0 | Other=54.3 crosses,Trend n=635 | Other n=114
+74,Returns to open after 0.5% move,30.2%,n=473 days
+79,Green candle streak limit (90% red follows),4 consecutive green candles,"{1: '14439', 2: '7234', 3: '3433', 4: '1665', 5: '847', 6: '409', 7: '174', 8: '74', 9: '28', 10: '9', 11: '8', 12: '6', 13: '1'}"
+80,Estimated slippage at 1800+ qty (proxy),~nan pts (half-spread of high-vol bars),n=0 bars with vol≥1800 | Actual slippage needs execution data
+81,Breakout retest probability,98.0%,n=490 breakout events
+82,False PDH breakout on Tuesday,55.7%,n=88 Tuesday PDH breakout attempts
+83,Drawdown duration before win (mins),Requires trade log CSV,
+84,Serial loss probability (3/5/7 in a row),Requires trade log CSV,
+85,Overtrading impact (>50 trades/day),Requires trade log CSV,
+86,High W1 volatility → low W2 volatility,6.4%,n=219 high-W1 days
+87,Range expansion in last 15 mins,93.4% of days expand in 3:15-3:30,n=748
+88,Quiet period duration before 50pt move,~nan mins of low volume,n=0 events
+91,15-min RSI>80 → 1-min short success (15pt/10pt),11.2%,n=1009 overbought events
+92,5-min vs 1-min trend alignment,64.1% of bars aligned,Trend alignment aids scalp entries
+93,% of 1-min bars above VWAP on trend days,0.0%,n=639 trend days
+94,BTST (close at High → next open),Gaps up 69.3% | Avg gain +44.7 pts,n=101 days closing near high
+95,MOC spike at 3:25 PM,Avg move 10.9 pts | ≥20pt: 15.0% of days,n=748
+96,Close sits in 3:00-3:30 H/L range,100.0%,n=748 (by definition should be ~100%)
+97,Nifty range when in sync with BankNifty,Sync=218.3 pts | Async=158.5 pts,Sync n=606 | Async n=143
+98,IT sector leads Nifty in W1,Requires NiftyIT instrument key,
+99,5pt target / 3pt stop scalp stats,Win rate 13.0% | RRR 1.67x | EV per trade -1.96 pts,"n=265,568 simulated trades | Wins=34,546 | Losses=231,022"
+100,Avg clean 10-pt moves per day,39.6 moves/day,n=749 days | max 89
+101,Days where scalping is mathematically impossible,0.0% (range < 0.8 pts cost),Using cost assumption of 0.4 pts per side

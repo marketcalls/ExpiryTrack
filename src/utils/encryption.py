@@ -1,18 +1,26 @@
 """
 Encryption utilities for secure credential storage
 """
-import os
+
 import base64
-from cryptography.fernet import Fernet
+import getpass
+import logging
+import os
+import platform
+from pathlib import Path
+
+from cryptography.fernet import Fernet, InvalidToken
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-from pathlib import Path
+
+logger = logging.getLogger(__name__)
+
 
 class CredentialEncryption:
     """Handle encryption/decryption of sensitive credentials"""
 
     def __init__(self):
-        self.key_file = Path.home() / '.expirytrack' / '.key'
+        self.key_file = Path.home() / ".expirytrack" / ".key"
         self.key = self._get_or_create_key()
         self.cipher = Fernet(self.key)
 
@@ -23,7 +31,7 @@ class CredentialEncryption:
 
         if self.key_file.exists():
             # Load existing key
-            with open(self.key_file, 'rb') as f:
+            with open(self.key_file, "rb") as f:
                 return f.read()
         else:
             # Generate new key using machine-specific salt
@@ -36,44 +44,56 @@ class CredentialEncryption:
             )
 
             # Use combination of machine ID and fixed password
-            password = f"ExpiryTrack_{os.environ.get('COMPUTERNAME', 'default')}_2024".encode()
+            password = f"ExpiryTrack_{platform.node() or 'default'}_2024".encode()
             key = base64.urlsafe_b64encode(kdf.derive(password))
 
             # Save key
-            with open(self.key_file, 'wb') as f:
+            with open(self.key_file, "wb") as f:
                 f.write(key)
 
             # Set file permissions (Windows compatible)
             try:
                 import stat
+
                 os.chmod(self.key_file, stat.S_IRUSR | stat.S_IWUSR)
-            except:
-                pass  # Windows may not support chmod
+            except OSError:
+                logger.debug("Could not set key file permissions (expected on Windows)")
 
             return key
 
     def _get_machine_salt(self) -> bytes:
         """Generate machine-specific salt"""
-        machine_id = f"{os.environ.get('COMPUTERNAME', 'unknown')}_{os.environ.get('USERNAME', 'user')}"
-        return machine_id.encode()[:16].ljust(16, b'0')  # Ensure 16 bytes
+        hostname = platform.node() or "unknown"
+        try:
+            username = getpass.getuser()
+        except (OSError, KeyError):
+            username = "user"
+        machine_id = f"{hostname}_{username}"
+        return machine_id.encode()[:16].ljust(16, b"0")  # Ensure 16 bytes
 
     def encrypt(self, plaintext: str) -> str:
-        """Encrypt plaintext string"""
+        """Encrypt plaintext string (Fernet output is already base64-safe)"""
         if not plaintext:
             return ""
-        encrypted_bytes = self.cipher.encrypt(plaintext.encode())
-        return base64.urlsafe_b64encode(encrypted_bytes).decode()
+        return self.cipher.encrypt(plaintext.encode()).decode()
 
     def decrypt(self, ciphertext: str) -> str:
-        """Decrypt ciphertext string"""
+        """Decrypt ciphertext string. Supports both new (single base64) and legacy (double base64) formats."""
         if not ciphertext:
             return ""
+        # Try new format first (direct Fernet token)
+        try:
+            return self.cipher.decrypt(ciphertext.encode()).decode()
+        except (ValueError, InvalidToken):
+            logger.debug("Direct Fernet decrypt failed, trying legacy format")
+        # Fall back to legacy double-base64 format
         try:
             encrypted_bytes = base64.urlsafe_b64decode(ciphertext.encode())
-            decrypted_bytes = self.cipher.decrypt(encrypted_bytes)
-            return decrypted_bytes.decode()
-        except Exception:
-            return ""  # Return empty string if decryption fails
+            return self.cipher.decrypt(encrypted_bytes).decode()
+        except (ValueError, InvalidToken) as e:
+            logger.warning(f"Decryption failed: {e}")
+            return ""
+
 
 # Singleton instance
 encryption = CredentialEncryption()

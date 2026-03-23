@@ -1,0 +1,285 @@
+{% extends "base.html" %}
+
+{% block title %}Coverage Calendar - ExpiryTrack{% endblock %}
+
+{% block content %}
+<div class="max-w-7xl mx-auto">
+    <div class="flex items-center justify-between mb-8">
+        <h1 class="text-3xl font-bold supabase-text-gradient">Coverage Calendar</h1>
+    </div>
+
+    <!-- Controls -->
+    <div class="card-minimal p-4 mb-6">
+        <div class="flex flex-wrap items-end gap-4">
+            <div>
+                <label class="text-sm font-medium text-gray-600 block mb-1">Instrument</label>
+                <select id="instrument-select" class="select select-bordered select-sm w-64"
+                        onchange="loadCalendar()">
+                    <option value="">Select instrument...</option>
+                </select>
+            </div>
+            <div>
+                <label class="text-sm font-medium text-gray-600 block mb-1">Year</label>
+                <select id="year-select" class="select select-bordered select-sm w-32"
+                        onchange="loadCalendar()">
+                </select>
+            </div>
+            <button onclick="loadCalendar()" class="btn-supabase text-sm">Refresh</button>
+        </div>
+    </div>
+
+    <!-- Legend -->
+    <div class="card-minimal p-4 mb-6">
+        <div class="flex items-center gap-6 flex-wrap">
+            <span class="text-sm font-medium text-gray-600">Coverage:</span>
+            <div class="flex items-center gap-2">
+                <span class="inline-block w-4 h-4 rounded" style="background: #e5e7eb;"></span>
+                <span class="text-xs text-gray-500">No data</span>
+            </div>
+            <div class="flex items-center gap-2">
+                <span class="inline-block w-4 h-4 rounded" style="background: #fca5a5;"></span>
+                <span class="text-xs text-gray-500">&lt; 25%</span>
+            </div>
+            <div class="flex items-center gap-2">
+                <span class="inline-block w-4 h-4 rounded" style="background: #fde047;"></span>
+                <span class="text-xs text-gray-500">25 - 75%</span>
+            </div>
+            <div class="flex items-center gap-2">
+                <span class="inline-block w-4 h-4 rounded" style="background: #4ade80;"></span>
+                <span class="text-xs text-gray-500">&gt; 75%</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Loading indicator -->
+    <div id="calendar-loading" class="text-center py-12 hidden">
+        <span class="loading loading-spinner loading-lg text-success"></span>
+        <p class="text-sm text-gray-500 mt-2">Loading coverage data...</p>
+    </div>
+
+    <!-- Empty state -->
+    <div id="calendar-empty" class="text-center py-16">
+        <svg class="w-16 h-16 mx-auto text-gray-300 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+                  d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+        </svg>
+        <p class="text-gray-500">Select an instrument to view its data coverage calendar.</p>
+    </div>
+
+    <!-- Calendar Grid -->
+    <div id="calendar-grid" class="hidden">
+        <!-- 12 month cards rendered by JS -->
+    </div>
+
+    <!-- Tooltip -->
+    <div id="cal-tooltip"
+         class="fixed z-[200] pointer-events-none hidden px-3 py-2 text-xs rounded-lg shadow-lg bg-gray-800 text-white"
+         style="max-width: 200px;">
+    </div>
+</div>
+
+<style>
+    .cal-month {
+        display: grid;
+        grid-template-columns: repeat(7, 1fr);
+        gap: 3px;
+    }
+    .cal-cell {
+        width: 100%;
+        aspect-ratio: 1;
+        border-radius: 3px;
+        cursor: pointer;
+        transition: transform 0.1s ease, box-shadow 0.1s ease;
+        min-width: 14px;
+    }
+    .cal-cell:hover {
+        transform: scale(1.4);
+        box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+        z-index: 10;
+        position: relative;
+    }
+    .cal-day-label {
+        font-size: 0.6rem;
+        color: #9ca3af;
+        text-align: center;
+    }
+
+    [data-theme="dark"] .cal-cell-empty {
+        background: #2d3748 !important;
+    }
+    [data-theme="dark"] #cal-tooltip {
+        background: #1a2744;
+        border: 1px solid #2d3748;
+    }
+</style>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function() {
+    var MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    var DAY_LABELS = ['Mon','','Wed','','Fri','',''];
+
+    // Populate year selector
+    var yearSel = document.getElementById('year-select');
+    var currentYear = new Date().getFullYear();
+    for (var y = currentYear; y >= currentYear - 3; y--) {
+        var opt = document.createElement('option');
+        opt.value = y;
+        opt.textContent = y;
+        yearSel.appendChild(opt);
+    }
+
+    // Load instruments
+    fetch('/api/analytics/instruments-with-data')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            var sel = document.getElementById('instrument-select');
+            (data.instruments || []).forEach(function(inst) {
+                var opt = document.createElement('option');
+                opt.value = inst.instrument_key;
+                opt.textContent = inst.symbol + ' (' + inst.instrument_key + ')';
+                sel.appendChild(opt);
+            });
+        })
+        .catch(function() {});
+
+    // Expose loadCalendar globally
+    window.loadCalendar = function() {
+        var instrument = document.getElementById('instrument-select').value;
+        var year = document.getElementById('year-select').value;
+        if (!instrument) return;
+
+        document.getElementById('calendar-empty').classList.add('hidden');
+        document.getElementById('calendar-grid').classList.add('hidden');
+        document.getElementById('calendar-loading').classList.remove('hidden');
+
+        fetch('/api/analytics/calendar?instrument=' + encodeURIComponent(instrument) + '&year=' + year)
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                document.getElementById('calendar-loading').classList.add('hidden');
+                renderCalendar(data.calendar || {}, parseInt(data.year));
+                document.getElementById('calendar-grid').classList.remove('hidden');
+            })
+            .catch(function(err) {
+                document.getElementById('calendar-loading').classList.add('hidden');
+                document.getElementById('calendar-empty').classList.remove('hidden');
+                showToast('Failed to load calendar data', 'error');
+            });
+    };
+
+    function coverageColor(pct) {
+        if (pct === null || pct === undefined) return '#e5e7eb';  // gray — no data
+        if (pct < 25) return '#fca5a5';   // red
+        if (pct <= 75) return '#fde047';   // yellow
+        return '#4ade80';                  // green
+    }
+
+    function renderCalendar(calData, year) {
+        var grid = document.getElementById('calendar-grid');
+        grid.innerHTML = '';
+
+        var container = document.createElement('div');
+        container.className = 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6';
+
+        for (var m = 0; m < 12; m++) {
+            var card = document.createElement('div');
+            card.className = 'card-minimal p-4';
+
+            var title = document.createElement('h3');
+            title.className = 'text-sm font-semibold mb-2 text-gray-700';
+            title.textContent = MONTHS[m] + ' ' + year;
+            card.appendChild(title);
+
+            // Day-of-week labels
+            var dayRow = document.createElement('div');
+            dayRow.className = 'cal-month mb-1';
+            DAY_LABELS.forEach(function(d) {
+                var lbl = document.createElement('div');
+                lbl.className = 'cal-day-label';
+                lbl.textContent = d;
+                dayRow.appendChild(lbl);
+            });
+            card.appendChild(dayRow);
+
+            // Build the month grid
+            var monthGrid = document.createElement('div');
+            monthGrid.className = 'cal-month';
+
+            var firstDay = new Date(year, m, 1);
+            // JS getDay: 0=Sun. We want Mon=0.
+            var startDow = (firstDay.getDay() + 6) % 7;
+            var daysInMonth = new Date(year, m + 1, 0).getDate();
+
+            // Empty cells before the first day
+            for (var e = 0; e < startDow; e++) {
+                var empty = document.createElement('div');
+                empty.className = 'cal-cell';
+                empty.style.background = 'transparent';
+                monthGrid.appendChild(empty);
+            }
+
+            // Day cells
+            for (var d = 1; d <= daysInMonth; d++) {
+                var dateStr = year + '-' + String(m + 1).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+                var pct = calData.hasOwnProperty(dateStr) ? calData[dateStr] : null;
+                var cell = document.createElement('div');
+                cell.className = 'cal-cell' + (pct === null ? ' cal-cell-empty' : '');
+                cell.style.background = coverageColor(pct);
+                cell.setAttribute('data-date', dateStr);
+                cell.setAttribute('data-pct', pct !== null ? pct : 'none');
+
+                // Tooltip events
+                cell.addEventListener('mouseenter', showTip);
+                cell.addEventListener('mouseleave', hideTip);
+
+                monthGrid.appendChild(cell);
+            }
+
+            card.appendChild(monthGrid);
+            container.appendChild(card);
+        }
+
+        grid.appendChild(container);
+    }
+
+    var tooltip = document.getElementById('cal-tooltip');
+
+    function showTip(e) {
+        var el = e.currentTarget;
+        var date = el.getAttribute('data-date');
+        var pct = el.getAttribute('data-pct');
+        var text = date;
+        if (pct === 'none') {
+            text += ' — No data';
+        } else {
+            text += ' — ' + parseFloat(pct).toFixed(1) + '% coverage';
+        }
+        tooltip.textContent = text;
+        tooltip.classList.remove('hidden');
+        positionTooltip(e);
+    }
+
+    function hideTip() {
+        tooltip.classList.add('hidden');
+    }
+
+    function positionTooltip(e) {
+        var x = e.clientX + 12;
+        var y = e.clientY - 30;
+        // Keep within viewport
+        var tw = tooltip.offsetWidth || 150;
+        if (x + tw > window.innerWidth - 8) x = e.clientX - tw - 12;
+        if (y < 8) y = e.clientY + 16;
+        tooltip.style.left = x + 'px';
+        tooltip.style.top = y + 'px';
+    }
+
+    document.addEventListener('mousemove', function(e) {
+        if (!tooltip.classList.contains('hidden')) {
+            positionTooltip(e);
+        }
+    });
+})();
+</script>
+{% endblock %}
