@@ -252,4 +252,4 @@ nul
 !logs/.gitkeep
 !logs/README.md
 !instance/README.md
-!flask_session/README.md
+!flask_session/README.md.zerodha_token.json
