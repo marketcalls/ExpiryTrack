@@ -1,8 +1,8 @@
 # ExpiryTrack Application Summary
 
-## Version 2.0 - Web Interface Release
+## Version 2.1 - DuckDB Market-Data Store
 
-### ✅ Successfully Built Components
+### Successfully Built Components
 
 ## 1. Web Application Interface
 
@@ -26,18 +26,41 @@ ExpiryTrack/
 ├── src/
 │   ├── api/          # Upstox API client with httpx
 │   ├── auth/         # OAuth 2.0 authentication
+│   ├── backtest/     # Backtesting / scanning helpers (DuckDB)
 │   ├── collectors/   # Task manager & data collection
-│   ├── database/     # SQLite database manager
-│   └── utils/        # Encryption, rate limiter, mapping
+│   ├── database/
+│   │   ├── manager.py        # SQLite metadata DB
+│   │   └── market_data.py    # DuckDB OHLCV+OI store
+│   ├── export/       # DuckDB-native CSV / JSON / ZIP / Parquet exporter
+│   └── utils/        # Encryption, rate limiter, mapping, OpenAlgo symbology
 ├── templates/        # Web UI templates
 │   ├── base.html
 │   ├── index.html
 │   ├── collect_wizard.html
 │   ├── settings.html
-│   └── status.html
-├── data/            # Database storage
-└── logs/            # Application logs
+│   ├── status.html
+│   └── query.html    # NEW: DuckDB SQL console
+├── test/             # Smoke + integration tests
+├── data/
+│   ├── expirytrack.db        # SQLite metadata
+│   └── market_data.duckdb    # DuckDB market data
+└── logs/             # Application logs
 ```
+
+## Storage Architecture
+
+ExpiryTrack splits config and market data across two engines:
+
+* **SQLite** (`data/expirytrack.db`) — credentials, instruments,
+  expiries, contracts, jobs. Small, OLTP-friendly, encrypted credentials.
+* **DuckDB** (`data/market_data.duckdb`) — all OHLCV+OI bars, columnar.
+  Wide denormalized table + resampling views (`market_data_5m`, `_15m`,
+  `_30m`, `_1h`, `_1d`). ART indexes on `openalgo_symbol`, `base_symbol`,
+  `expiry_date`, `ts`. Bulk inserts via pandas DataFrame ingestion
+  (~270k rows/sec on a desktop box).
+* **Cross-database joins**: the SQLite DB is ATTACHed read-only as schema
+  `meta`, so analytical queries can pick up `lot_size`, `tick_size`, etc.
+  with `JOIN meta.contracts USING (expired_instrument_key)`.
 
 ## 3. Key Features Implemented
 

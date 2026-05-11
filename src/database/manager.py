@@ -1,6 +1,12 @@
 """
 Database Manager for ExpiryTrack
-Handles SQLite/DuckDB operations with optimized time-series storage
+
+Stores configuration / metadata in SQLite:
+    credentials, default_instruments, instruments, expiries, contracts,
+    job_status.
+
+Historical OHLCV+OI data lives in DuckDB and is accessed transparently
+through MarketDataStore; the historical_data SQLite table has been removed.
 """
 import json
 import sqlite3
@@ -11,6 +17,7 @@ import logging
 from contextlib import contextmanager
 
 from ..config import config
+from .market_data import MarketDataStore
 
 logger = logging.getLogger(__name__)
 
@@ -21,13 +28,13 @@ class DatabaseManager:
 
     def __init__(self, db_path: Optional[Path] = None):
         """
-        Initialize database manager
+        Initialize database manager.
 
         Args:
-            db_path: Path to database file
+            db_path: Path to SQLite metadata DB. Defaults to config.DB_PATH.
         """
         self.db_path = db_path or config.DB_PATH
-        self.db_type = config.DB_TYPE
+        self.db_type = 'sqlite'
 
         # Create database directory if needed
         self.db_path.parent.mkdir(exist_ok=True, parents=True)
@@ -35,23 +42,30 @@ class DatabaseManager:
         # Initialize database
         self._init_database()
 
+        # DuckDB-backed market data store (lazy: created on first use).
+        # Hosts everything that used to be in the historical_data table.
+        self._market_data: Optional[MarketDataStore] = None
+
+    @property
+    def market_data(self) -> MarketDataStore:
+        """Singleton MarketDataStore for OHLCV+OI access."""
+        if self._market_data is None:
+            self._market_data = MarketDataStore.instance()
+        return self._market_data
+
     @contextmanager
     def get_connection(self):
-        """Context manager for database connections"""
+        """Context manager for SQLite metadata connections."""
         conn = None
         try:
-            if self.db_type == 'sqlite':
-                conn = sqlite3.connect(str(self.db_path))
-                conn.row_factory = sqlite3.Row
-                # Enable optimizations
-                conn.execute("PRAGMA journal_mode = WAL")
-                conn.execute("PRAGMA synchronous = NORMAL")
-                conn.execute("PRAGMA cache_size = -64000")  # 64MB cache
-                conn.execute("PRAGMA temp_store = MEMORY")
-                conn.execute("PRAGMA foreign_keys = ON")
-            else:
-                # DuckDB support can be added here
-                raise NotImplementedError("DuckDB support coming soon")
+            conn = sqlite3.connect(str(self.db_path))
+            conn.row_factory = sqlite3.Row
+            # Enable optimizations
+            conn.execute("PRAGMA journal_mode = WAL")
+            conn.execute("PRAGMA synchronous = NORMAL")
+            conn.execute("PRAGMA cache_size = -64000")  # 64MB cache
+            conn.execute("PRAGMA temp_store = MEMORY")
+            conn.execute("PRAGMA foreign_keys = ON")
 
             yield conn
             conn.commit()
@@ -87,18 +101,22 @@ class DatabaseManager:
                     conn.commit()
                     logger.info("Created index for openalgo_symbol column")
 
-            # Check if historical_data table exists and needs oi column
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='historical_data'")
+            # historical_data has moved to DuckDB.  Drop the legacy SQLite
+            # table on first run so the two stores never go out of sync.
+            cursor.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='historical_data'"
+            )
             if cursor.fetchone():
-                # Table exists, check for oi column
-                cursor.execute("PRAGMA table_info(historical_data)")
-                columns = [col[1] for col in cursor.fetchall()]
-
-                if 'oi' not in columns and 'open_interest' not in columns:
-                    # Add the oi column to existing table
-                    cursor.execute("ALTER TABLE historical_data ADD COLUMN oi BIGINT DEFAULT 0")
-                    conn.commit()
-                    logger.info("Added oi column to historical_data table")
+                logger.info("Dropping legacy SQLite historical_data table (now in DuckDB)")
+                cursor.execute("DROP TABLE historical_data")
+                # Also reset data_fetched so the user can re-collect into DuckDB.
+                try:
+                    cursor.execute(
+                        "UPDATE contracts SET data_fetched = FALSE WHERE data_fetched = TRUE"
+                    )
+                except sqlite3.OperationalError:
+                    pass
+                conn.commit()
 
             # Create credentials table for encrypted storage
             cursor.execute("""
@@ -176,21 +194,8 @@ class DatabaseManager:
                 )
             """)
 
-            # Create historical_data table (optimized for time-series)
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS historical_data (
-                    expired_instrument_key TEXT NOT NULL,
-                    timestamp TIMESTAMP NOT NULL,
-                    open DECIMAL(10,2) NOT NULL,
-                    high DECIMAL(10,2) NOT NULL,
-                    low DECIMAL(10,2) NOT NULL,
-                    close DECIMAL(10,2) NOT NULL,
-                    volume BIGINT NOT NULL,
-                    oi BIGINT DEFAULT 0,
-                    PRIMARY KEY (expired_instrument_key, timestamp),
-                    FOREIGN KEY (expired_instrument_key) REFERENCES contracts(expired_instrument_key)
-                )
-            """)
+            # historical_data is intentionally NOT created here.
+            # All OHLCV+OI bars live in DuckDB; see MarketDataStore.
 
             # Create job_status table
             cursor.execute("""
@@ -215,11 +220,9 @@ class DatabaseManager:
                 "CREATE INDEX IF NOT EXISTS idx_expiry_date ON contracts(expiry_date)",
                 "CREATE INDEX IF NOT EXISTS idx_contract_type ON contracts(contract_type)",
                 "CREATE INDEX IF NOT EXISTS idx_strike_price ON contracts(strike_price)",
-                "CREATE INDEX IF NOT EXISTS idx_openalgo_symbol ON contracts(openalgo_symbol)",  # Index for OpenAlgo symbols
+                "CREATE INDEX IF NOT EXISTS idx_openalgo_symbol ON contracts(openalgo_symbol)",
                 "CREATE INDEX IF NOT EXISTS idx_instrument_expiry ON contracts(instrument_key, expiry_date)",
-                "CREATE INDEX IF NOT EXISTS idx_historical_date ON historical_data(DATE(timestamp))",
-                "CREATE INDEX IF NOT EXISTS idx_historical_instrument ON historical_data(expired_instrument_key)",
-                "CREATE INDEX IF NOT EXISTS idx_job_status ON job_status(status, job_type)"
+                "CREATE INDEX IF NOT EXISTS idx_job_status ON job_status(status, job_type)",
             ]
 
             for index in indices:
@@ -439,76 +442,89 @@ class DatabaseManager:
             return [dict(row) for row in cursor.fetchall()]
 
     # Historical data operations
+    # ----------------------------------------------------------------------
+    # All OHLCV+OI persistence is delegated to MarketDataStore (DuckDB).
+    # Callers should prefer the new signature `insert_candles(contract, ...)`
+    # which carries enough context to populate the denormalized columns.
+    # ----------------------------------------------------------------------
+    def insert_candles(self, contract: Dict, candles: List[List]) -> int:
+        """
+        Insert OHLCV+OI candles for one contract into the DuckDB store and
+        flip its `data_fetched` flag in SQLite.
+        """
+        if not candles:
+            return 0
+
+        # Make sure the contract dict carries the denormalizing fields the
+        # store needs.  If only the expired_instrument_key is known, look up
+        # the rest from SQLite.
+        contract = self._enrich_contract(contract)
+
+        count = self.market_data.insert_candles(contract, candles)
+
+        if count:
+            expired_key = (
+                contract.get("expired_instrument_key")
+                or contract.get("instrument_key", "")
+            )
+            with self.get_connection() as conn:
+                cur = conn.cursor()
+                cur.execute(
+                    "UPDATE contracts SET data_fetched = TRUE WHERE expired_instrument_key = ?",
+                    (expired_key,),
+                )
+            logger.info(f"Inserted {count} candles for {expired_key} (DuckDB)")
+        return count
+
     def insert_historical_data(self, expired_instrument_key: str, candles: List[List]) -> int:
         """
-        Insert historical OHLCV data
-
-        Args:
-            expired_instrument_key: Contract identifier
-            candles: List of [timestamp, open, high, low, close, volume, oi]
-
-        Returns:
-            Number of records inserted
+        Backwards-compatible wrapper: looks up the contract row in SQLite and
+        delegates to insert_candles().
         """
+        contract = self._lookup_contract(expired_instrument_key)
+        if not contract:
+            logger.error(
+                f"insert_historical_data: contract {expired_instrument_key} not found in SQLite"
+            )
+            return 0
+        return self.insert_candles(contract, candles)
+
+    def _lookup_contract(self, expired_instrument_key: str) -> Optional[Dict]:
+        """Fetch a contract row by its expired_instrument_key."""
         with self.get_connection() as conn:
-            cursor = conn.cursor()
-            count = 0
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT * FROM contracts WHERE expired_instrument_key = ?",
+                (expired_instrument_key,),
+            )
+            row = cur.fetchone()
+            return dict(row) if row else None
 
-            # Prepare batch insert
-            data_to_insert = []
-            for candle in candles:
-                try:
-                    # Parse candle data
-                    timestamp = candle[0]
-                    open_price = float(candle[1])
-                    high = float(candle[2])
-                    low = float(candle[3])
-                    close = float(candle[4])
-                    volume = int(candle[5])
-                    open_interest = int(candle[6]) if len(candle) > 6 else None
+    def _enrich_contract(self, contract: Dict) -> Dict:
+        """
+        Ensure a contract dict has the fields MarketDataStore expects.
 
-                    data_to_insert.append((
-                        expired_instrument_key,
-                        timestamp,
-                        open_price,
-                        high,
-                        low,
-                        close,
-                        volume,
-                        open_interest
-                    ))
-                except Exception as e:
-                    logger.error(f"Failed to parse candle: {e}")
+        Accepts both the raw API shape (where `instrument_key` is the expired
+        contract id) and the SQLite-row shape (where `expired_instrument_key`
+        is set explicitly).
+        """
+        # Already enriched?
+        if contract.get("expired_instrument_key") and contract.get("trading_symbol"):
+            return contract
 
-            # Batch insert
-            if data_to_insert:
-                try:
-                    cursor.executemany("""
-                        INSERT OR REPLACE INTO historical_data
-                        (expired_instrument_key, timestamp, open, high, low, close, volume, oi)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    """, data_to_insert)
-
-                    conn.commit()  # Explicitly commit the transaction
-                    count = len(data_to_insert)  # Use len instead of rowcount
-                    logger.info(f"Successfully inserted {count} candles for {expired_instrument_key}")
-
-                    # Mark contract as data fetched
-                    cursor.execute("""
-                        UPDATE contracts
-                        SET data_fetched = TRUE
-                        WHERE expired_instrument_key = ?
-                    """, (expired_instrument_key,))
-                    conn.commit()
-
-                except Exception as e:
-                    logger.error(f"Failed to insert historical data for {expired_instrument_key}: {e}")
-                    conn.rollback()
-                    raise e
-            else:
-                logger.warning(f"No data to insert for {expired_instrument_key}")
-
-            return count
+        # API shape: instrument_key holds the per-contract expired key.
+        expired_key = (
+            contract.get("expired_instrument_key")
+            or contract.get("instrument_key", "")
+        )
+        if expired_key:
+            row = self._lookup_contract(expired_key)
+            if row:
+                merged = dict(row)
+                merged.update({k: v for k, v in contract.items() if v is not None})
+                merged["expired_instrument_key"] = expired_key
+                return merged
+        return contract
 
     # Job management
     def create_job(self, job_type: str, **kwargs) -> int:
@@ -563,49 +579,46 @@ class DatabaseManager:
 
     # Query operations
     def get_historical_data_count(self, expired_instrument_key: str = None) -> int:
-        """Get count of historical data records"""
-        with self.get_connection() as conn:
-            cursor = conn.cursor()
-            if expired_instrument_key:
-                cursor.execute("""
-                    SELECT COUNT(*) FROM historical_data
-                    WHERE expired_instrument_key = ?
-                """, (expired_instrument_key,))
-            else:
-                cursor.execute("SELECT COUNT(*) FROM historical_data")
-            return cursor.fetchone()[0]
+        """Get count of historical data records (from DuckDB)."""
+        if expired_instrument_key:
+            df = self.market_data.sql(
+                "SELECT count(*) AS c FROM market_data WHERE expired_instrument_key = ?",
+                [expired_instrument_key],
+            )
+        else:
+            df = self.market_data.sql("SELECT count(*) AS c FROM market_data")
+        return int(df["c"].iloc[0]) if not df.empty else 0
 
     def get_summary_stats(self) -> Dict:
-        """Get database summary statistics"""
+        """Get database summary statistics (joins SQLite + DuckDB)."""
+        stats: Dict[str, Any] = {}
         with self.get_connection() as conn:
             cursor = conn.cursor()
 
-            stats = {}
-
-            # Count instruments
             cursor.execute("SELECT COUNT(*) FROM instruments")
             stats['total_instruments'] = cursor.fetchone()[0]
 
-            # Count expiries
             cursor.execute("SELECT COUNT(*) FROM expiries")
             stats['total_expiries'] = cursor.fetchone()[0]
 
-            # Count contracts
             cursor.execute("SELECT COUNT(*) FROM contracts")
             stats['total_contracts'] = cursor.fetchone()[0]
 
-            # Count historical data
-            cursor.execute("SELECT COUNT(*) FROM historical_data")
-            stats['total_candles'] = cursor.fetchone()[0]
-
-            # Pending work
             cursor.execute("SELECT COUNT(*) FROM expiries WHERE contracts_fetched = FALSE")
             stats['pending_expiries'] = cursor.fetchone()[0]
 
             cursor.execute("SELECT COUNT(*) FROM contracts WHERE data_fetched = FALSE")
             stats['pending_contracts'] = cursor.fetchone()[0]
 
-            return stats
+        # Candle count comes from DuckDB.
+        try:
+            md = self.market_data.get_summary()
+            stats['total_candles'] = int(md.get('total_candles') or 0)
+        except Exception as e:
+            logger.warning(f"market_data summary unavailable: {e}")
+            stats['total_candles'] = 0
+
+        return stats
 
     # OpenAlgo symbol queries
     def get_contract_by_openalgo_symbol(self, openalgo_symbol: str) -> Optional[Dict]:
@@ -721,30 +734,36 @@ class DatabaseManager:
             return [dict(row) for row in cursor.fetchall()]
 
     def get_historical_data(self, expired_instrument_key: str) -> List[List]:
-        """Get historical data for a specific expired instrument
+        """Get historical data for a specific expired instrument.
 
-        Args:
-            expired_instrument_key: The expired instrument key
-
-        Returns:
-            List of candles [timestamp, open, high, low, close, volume, oi]
+        Reads from the DuckDB store; returns list-of-lists for backwards
+        compatibility with the exporter and demo scripts.
         """
-        with self.get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT timestamp, open, high, low, close, volume, oi
-                FROM historical_data
-                WHERE expired_instrument_key = ?
-                ORDER BY timestamp
-            """, (expired_instrument_key,))
-            return [list(row) for row in cursor.fetchall()]
+        df = self.market_data.sql(
+            """
+            SELECT ts, open, high, low, close, volume, oi
+            FROM market_data
+            WHERE expired_instrument_key = ?
+            ORDER BY ts
+            """,
+            [expired_instrument_key],
+        )
+        if df.empty:
+            return []
+        # Render timestamps as ISO strings to match the prior contract.
+        df = df.copy()
+        df["ts"] = df["ts"].astype(str)
+        return df.values.tolist()
 
     def vacuum(self) -> None:
-        """Optimize database (SQLite)"""
-        if self.db_type == 'sqlite':
-            with self.get_connection() as conn:
-                conn.execute("VACUUM")
-                logger.info("Database optimized (VACUUM completed)")
+        """Optimize both databases."""
+        with self.get_connection() as conn:
+            conn.execute("VACUUM")
+        try:
+            self.market_data.vacuum()
+        except Exception as e:
+            logger.warning(f"market_data vacuum skipped: {e}")
+        logger.info("Database optimized (SQLite VACUUM + DuckDB CHECKPOINT)")
 
     def __str__(self) -> str:
         """String representation"""

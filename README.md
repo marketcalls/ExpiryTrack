@@ -10,16 +10,18 @@ ExpiryTrack is a modern web application that systematically collects, stores, an
 
 ## 🌟 Key Features
 
-- **🎯 Web-Based Interface**: Clean, intuitive UI with step-by-step wizard
-- **🔐 Zero Configuration**: Encrypted credential storage - no .env files needed
-- **📊 Multi-Instrument Support**: Pre-configured for Nifty 50, Bank Nifty, and Sensex
-- **📈 3-Month Historical Data**: Automatically downloads last 3 months before expiry
-- **⚡ Real-Time Progress**: Live monitoring with detailed logs and statistics
-- **🔄 Async Processing**: Efficient background task management
-- **🛡️ Secure**: OAuth 2.0 authentication with encrypted storage
-- **📤 Easy Data Export**: Web-based export wizard and CLI tool for CSV, JSON, and ZIP formats
-- **📅 Separate Date/Time Columns**: Exports include individual date and time columns for easy analysis
-- **💹 Open Interest Data**: Full OI (Open Interest) data included in exports
+- **Web-Based Interface**: Clean, intuitive UI with step-by-step wizard
+- **Zero Configuration**: Encrypted credential storage - no .env files needed
+- **Multi-Instrument Support**: Pre-configured for Nifty 50, Bank Nifty, and Sensex
+- **3-Month Historical Data**: Automatically downloads last 3 months before expiry
+- **Real-Time Progress**: Live monitoring with detailed logs and statistics
+- **Async Processing**: Efficient background task management
+- **Secure**: OAuth 2.0 authentication with encrypted storage
+- **Easy Data Export**: Web-based export wizard and CLI tool for CSV / JSON / ZIP / Parquet
+- **DuckDB analytics**: Market data stored in DuckDB for fast columnar scans, vectorized backtesting, and ad-hoc SQL
+- **Built-in Query / Scan page**: run read-only DuckDB SQL right from the browser, with CSV / Parquet export
+- **Separate Date/Time Columns**: Exports include individual date and time columns for easy analysis
+- **Open Interest Data**: Full OI (Open Interest) data included in exports
 
 ## 🚀 Quick Start
 
@@ -169,48 +171,94 @@ Navigate to "Status" page to:
 - Check task history
 - Monitor system health
 
-## 🗂️ Project Structure
+## Project Structure
 
 ```
 ExpiryTrack/
-├── app.py                  # Main Flask application
-├── main.py                 # CLI interface (optional)
-├── requirements.txt        # Python dependencies
-├── .env.example           # Configuration template
-├── src/                   # Source code
-│   ├── api/              # Upstox API client
-│   ├── auth/             # Authentication manager
-│   ├── collectors/       # Data collection logic
-│   ├── database/         # Database operations
-│   └── utils/            # Utilities
-├── templates/            # HTML templates
-│   ├── base.html        # Base template
-│   ├── index.html       # Home page
-│   ├── settings.html    # Settings page
-│   ├── dashboard.html   # Dashboard
-│   ├── collect_wizard.html # Collection wizard
-│   ├── export_wizard.html  # Export wizard
-│   └── status.html      # Status page
-├── src/export/          # Export functionality
-│   └── exporter.py      # Data export logic
-├── exports/             # Exported data files
-├── data/                 # Database storage
-├── logs/                 # Application logs
-└── design/              # Documentation
+├── app.py                  # Flask application
+├── main.py                 # CLI entry point
+├── requirements.txt        # Python dependencies (latest pinned versions)
+├── pyproject.toml          # Project metadata for uv
+├── .env / .env.example     # Environment overrides (SQLite + DuckDB paths)
+├── src/
+│   ├── api/                # Upstox API client (httpx + rate limiter)
+│   ├── auth/               # OAuth + encrypted credential storage
+│   ├── backtest/           # Backtesting / scanning helpers on top of DuckDB
+│   ├── collectors/         # Async collection orchestration + task manager
+│   ├── database/
+│   │   ├── manager.py      # SQLite metadata DB (config tables)
+│   │   └── market_data.py  # DuckDB-backed MarketDataStore (OHLCV+OI)
+│   ├── export/             # DuckDB-native CSV / JSON / ZIP / Parquet exporter
+│   └── utils/              # Encryption, logging, OpenAlgo symbology, rate limiter
+├── templates/
+│   ├── base.html, index.html, settings.html, status.html
+│   ├── collect_wizard.html, export_wizard.html
+│   └── query.html          # New: DuckDB SQL console
+├── test/                   # Smoke / integration tests
+├── data/
+│   ├── expirytrack.db      # SQLite metadata
+│   └── market_data.duckdb  # DuckDB market data
+├── exports/                # CSV / JSON / ZIP / Parquet outputs
+├── logs/                   # Application logs
+└── design/                 # Architectural docs
 ```
 
-## 📊 Data Storage
+## Data Storage
 
-### Database Location
-- SQLite database: `data/expirytrack.db`
-- Encrypted credentials stored in database
-- No sensitive data in plain text files
+ExpiryTrack uses a **two-database split** so OLTP and analytical workloads
+don't compete for the same engine:
 
-### Data Structure
-- **Historical Data**: 1-minute OHLCV candles with timestamps
-- **Contract Info**: Strike prices, expiry dates, instrument keys
-- **OpenAlgo Symbols**: User-friendly symbology for easy querying
-- **Collection Metadata**: Task status, progress, logs
+| Path | Engine | Holds | Why |
+|---|---|---|---|
+| `data/expirytrack.db` | **SQLite** | credentials, instruments, expiries, contracts, job status | Small, frequent point reads/writes; encrypted credentials |
+| `data/market_data.duckdb` | **DuckDB** | All OHLCV+OI bars (1-minute candles) | Columnar storage, zone-skipping, vectorized analytics, native Parquet export |
+
+Both paths are configurable via `.env`:
+
+```
+DATABASE_PATH=./data/expirytrack.db
+MARKET_DATA_DB_PATH=./data/market_data.duckdb
+```
+
+### DuckDB schema (`market_data`)
+
+A single wide, denormalized table — repeated category columns
+(`base_symbol`, `expiry_date`, `contract_type`) cost almost nothing to store
+thanks to DuckDB's RLE / dictionary encoding, and let nearly every analytical
+query skip joins entirely:
+
+```sql
+CREATE TABLE market_data (
+    expired_instrument_key  VARCHAR  NOT NULL,
+    openalgo_symbol         VARCHAR  NOT NULL,
+    base_symbol             VARCHAR  NOT NULL,
+    instrument_key          VARCHAR  NOT NULL,
+    expiry_date             DATE     NOT NULL,
+    contract_type           VARCHAR  NOT NULL,   -- 'CE' | 'PE' | 'FUT'
+    strike_price            DOUBLE,
+    trading_symbol          VARCHAR,
+    ts                      TIMESTAMPTZ NOT NULL,
+    open, high, low, close  DOUBLE   NOT NULL,
+    volume                  BIGINT   NOT NULL,
+    oi                      BIGINT,
+    PRIMARY KEY (expired_instrument_key, ts)
+);
+```
+
+Pre-built resampling views (`market_data_5m`, `_15m`, `_30m`, `_1h`, `_1d`)
+are computed on demand from the 1-minute base using DuckDB `time_bucket`.
+
+### Cross-database joins
+
+The SQLite metadata DB is `ATTACH`ed read-only as schema `meta`, so cross-DB
+joins are one statement away:
+
+```sql
+SELECT m.openalgo_symbol, m.ts, m.close, c.lot_size, c.tick_size
+FROM market_data m
+JOIN meta.contracts c USING (expired_instrument_key)
+WHERE m.base_symbol = 'NIFTY';
+```
 
 ## 🔤 OpenAlgo Symbology
 
@@ -242,7 +290,7 @@ Format: `[BaseSymbol][DDMMMYY][Strike][CE/PE]`
 
 ### Database Queries
 
-Query contracts using OpenAlgo symbols:
+Query contract metadata (SQLite) using OpenAlgo symbols:
 
 ```python
 # Get specific contract
@@ -260,6 +308,39 @@ futures = db.get_futures_by_symbol('BANKNIFTY')
 # Search symbols
 results = db.search_openalgo_symbols('MAR24')
 ```
+
+### Backtesting / scanning over DuckDB
+
+For OHLCV+OI access, use the vectorized helpers in `src.backtest`. All
+functions return pandas DataFrames (zero-copy through Arrow), suitable for
+plugging directly into your strategy code:
+
+```python
+from src.backtest import bars, chain, scan, BacktestData
+
+# 5-minute resampled bars for one contract
+df = bars("NIFTY28APR2624000CE", timeframe="5m")
+
+# Option chain snapshot at a given timestamp
+ch = chain("NIFTY", "2026-04-28", at="2026-04-25 14:30")
+
+# Top-volume CE strikes on a given day
+hot = scan(base_symbol="NIFTY", contract_type="CE", date="2026-04-25") \
+        .nlargest(20, "volume")
+
+# Iterate the chain forward in time for an event-driven backtest
+bt = BacktestData("NIFTY", "2026-04-28", timeframe="5m")
+for ts, snap in bt.iter_bars():
+    # snap is a DataFrame: one row per contract for that timestamp
+    ...
+```
+
+### Interactive Query / Scan page
+
+The web UI ships with an in-browser DuckDB SQL console at `/query` for
+ad-hoc analysis: write `SELECT` / `WITH` queries, view results in a sortable
+table, and download the full result set as CSV or Parquet. Read-only by
+construction — DDL/DML tokens are rejected at the API boundary.
 
 ### SQL Examples
 

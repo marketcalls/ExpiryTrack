@@ -275,6 +275,169 @@ def help_page():
     """Help page with CLI commands and OpenAlgo documentation"""
     return render_template('help.html')
 
+# ---------------------------------------------------------------------------
+# Query / Scan page  (DuckDB-backed)
+# ---------------------------------------------------------------------------
+
+# A handful of canned queries to seed the editor.  Read-only by construction
+# because the DuckDB cursor is invoked through MarketDataStore.read().
+QUERY_PRESETS = [
+    {
+        "name": "Recent NIFTY candles",
+        "sql": (
+            "SELECT openalgo_symbol, ts, open, high, low, close, volume, oi\n"
+            "FROM market_data\n"
+            "WHERE base_symbol = 'NIFTY'\n"
+            "ORDER BY ts DESC\n"
+            "LIMIT 200"
+        ),
+    },
+    {
+        "name": "Top volume contracts (last 7 days)",
+        "sql": (
+            "SELECT openalgo_symbol,\n"
+            "       sum(volume) AS total_volume,\n"
+            "       count(*)    AS bars\n"
+            "FROM market_data\n"
+            "WHERE ts >= now() - INTERVAL 7 DAY\n"
+            "GROUP BY openalgo_symbol\n"
+            "ORDER BY total_volume DESC\n"
+            "LIMIT 25"
+        ),
+    },
+    {
+        "name": "Option chain snapshot at latest tick",
+        "sql": (
+            "WITH ranked AS (\n"
+            "    SELECT *,\n"
+            "           row_number() OVER (PARTITION BY expired_instrument_key\n"
+            "                              ORDER BY ts DESC) AS rn\n"
+            "    FROM market_data\n"
+            "    WHERE base_symbol = 'NIFTY' AND expiry_date = (SELECT max(expiry_date) FROM market_data WHERE base_symbol='NIFTY')\n"
+            ")\n"
+            "SELECT openalgo_symbol, contract_type, strike_price, ts, close, volume, oi\n"
+            "FROM ranked WHERE rn = 1\n"
+            "ORDER BY contract_type, strike_price"
+        ),
+    },
+    {
+        "name": "Daily OHLCV roll-up",
+        "sql": (
+            "SELECT openalgo_symbol,\n"
+            "       CAST(ts AS DATE) AS d,\n"
+            "       first(open ORDER BY ts) AS open,\n"
+            "       max(high) AS high,\n"
+            "       min(low)  AS low,\n"
+            "       last(close ORDER BY ts) AS close,\n"
+            "       sum(volume) AS volume,\n"
+            "       last(oi ORDER BY ts) AS oi\n"
+            "FROM market_data\n"
+            "WHERE base_symbol = 'NIFTY'\n"
+            "GROUP BY openalgo_symbol, CAST(ts AS DATE)\n"
+            "ORDER BY d DESC, openalgo_symbol\n"
+            "LIMIT 200"
+        ),
+    },
+    {
+        "name": "Join with SQLite contract metadata",
+        "sql": (
+            "SELECT m.openalgo_symbol, m.ts, m.close, c.lot_size, c.tick_size\n"
+            "FROM market_data m\n"
+            "JOIN meta.contracts c USING (expired_instrument_key)\n"
+            "WHERE m.base_symbol = 'NIFTY'\n"
+            "ORDER BY m.ts DESC\n"
+            "LIMIT 100"
+        ),
+    },
+]
+
+# Disallowed top-level keywords for the query endpoint.  Crude but effective:
+# the DuckDB ATTACH of SQLite is read-only and the connection is opened for
+# writes by the collector, so blocking these tokens prevents accidental DDL.
+_FORBIDDEN_TOKENS = {
+    "insert", "update", "delete", "drop", "alter", "create", "attach",
+    "detach", "truncate", "copy", "replace", "vacuum", "checkpoint",
+    "pragma", "set", "call", "export",
+}
+
+def _looks_read_only(sql_text: str) -> bool:
+    head = sql_text.strip().lower()
+    if not head:
+        return False
+    # Only the first token decides.  WITH/SELECT are allowed.
+    first = head.split(None, 1)[0]
+    if first in _FORBIDDEN_TOKENS:
+        return False
+    return True
+
+
+@app.route('/query')
+def query_page():
+    """Interactive DuckDB SQL console over market_data."""
+    return render_template(
+        'query.html',
+        presets=QUERY_PRESETS,
+        store_summary=db_manager.market_data.get_summary(),
+    )
+
+
+@app.route('/api/query/run', methods=['POST'])
+def api_query_run():
+    payload = request.json or {}
+    sql_text = (payload.get('sql') or '').strip()
+    if not sql_text:
+        return jsonify({'error': 'Empty query'}), 400
+    if not _looks_read_only(sql_text):
+        return jsonify({'error': 'Only read-only queries (SELECT / WITH) are permitted from the UI.'}), 400
+    try:
+        df = db_manager.market_data.sql(sql_text)
+    except Exception as exc:  # pragma: no cover - surfaces directly to UI
+        return jsonify({'error': str(exc)}), 400
+
+    row_limit = int(payload.get('row_limit', 1000) or 1000)
+    truncated = len(df) > row_limit
+    df_out = df.head(row_limit)
+    return jsonify({
+        'columns': list(df_out.columns),
+        'rows': df_out.astype(object).where(df_out.notna(), None).values.tolist(),
+        'row_count': int(len(df)),
+        'returned': int(len(df_out)),
+        'truncated': truncated,
+    })
+
+
+@app.route('/api/query/export', methods=['POST'])
+def api_query_export():
+    """Run the query and stream the full result as CSV or Parquet."""
+    from flask import send_file
+    payload = request.json or {}
+    sql_text = (payload.get('sql') or '').strip()
+    fmt = (payload.get('format') or 'csv').lower()
+    if not sql_text:
+        return jsonify({'error': 'Empty query'}), 400
+    if not _looks_read_only(sql_text):
+        return jsonify({'error': 'Only read-only queries are permitted.'}), 400
+    if fmt not in ('csv', 'parquet'):
+        return jsonify({'error': 'format must be csv or parquet'}), 400
+
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    suffix = 'csv' if fmt == 'csv' else 'parquet'
+    out_path = config.EXPORTS_DIR / f'query_{timestamp}.{suffix}'
+    try:
+        if fmt == 'csv':
+            db_manager.market_data.to_csv(out_path, sql_text)
+        else:
+            db_manager.market_data.to_parquet(out_path, sql_text)
+    except Exception as exc:
+        return jsonify({'error': str(exc)}), 400
+
+    return send_file(
+        str(out_path),
+        as_attachment=True,
+        download_name=out_path.name,
+        mimetype='application/octet-stream',
+    )
+
 # Export Routes
 @app.route('/export')
 def export_wizard():

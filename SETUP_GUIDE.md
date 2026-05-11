@@ -1,43 +1,62 @@
 # ExpiryTrack Setup Guide
 
-## 🚀 Quick Setup
+## Quick Setup
 
 Follow these steps to get ExpiryTrack running on your system.
 
 ## Prerequisites
 
-1. Python 3.9 or higher
-2. Upstox Developer Account
-3. Windows/Linux/Mac OS
+1. Python 3.10 or higher
+2. Upstox Developer Account (with the **Plus Plan** active — required for
+   expired-contract historical data)
+3. Windows / Linux / macOS
 
 ## Step 1: Install Dependencies
 
 ```bash
-# Install required packages
+# Recommended: uv (handles the venv automatically)
+uv sync
+
+# Alternative: pip
 pip install -r requirements.txt
 ```
 
+ExpiryTrack uses two databases:
+* `data/expirytrack.db` — SQLite (config, instruments, contracts, jobs)
+* `data/market_data.duckdb` — DuckDB (all OHLCV+OI bars)
+
+Both are auto-created on first run; you don't need to provision anything.
+
 ## Step 2: Configure Environment
 
-1. Copy the example environment file:
+The app has sensible defaults, so a `.env` file is **optional**. If you want
+to override paths or other knobs, copy the template and edit:
+
 ```bash
 cp .env.example .env
 ```
 
-2. Edit `.env` file with your Upstox credentials:
+Key settings:
+
 ```env
-UPSTOX_API_KEY=your_api_key_here
-UPSTOX_API_SECRET=your_api_secret_here
-UPSTOX_REDIRECT_URI=http://127.0.0.1:5000/upstox/callback
+# SQLite metadata DB (small)
+DATABASE_PATH=./data/expirytrack.db
+
+# DuckDB market-data store (grows with collected candles)
+MARKET_DATA_DB_PATH=./data/market_data.duckdb
 ```
 
-## Step 3: Initialize Database
+Credentials are stored encrypted in SQLite via the web Settings page —
+you do **not** need to put `UPSTOX_API_KEY` / `UPSTOX_API_SECRET` in `.env`.
+
+## Step 3: Initialize (optional)
 
 ```bash
 python scripts/init_database.py
 ```
 
-This creates the SQLite database with all required tables.
+This pre-creates the SQLite schema. Skipping the step is fine — the
+DatabaseManager runs the same DDL the first time the app starts.
 
 ## Step 4: Test Connection
 
@@ -109,16 +128,16 @@ Output:
 ```
 ExpiryTrack Database Status
 ==================================================
-📊 Instruments: 1
-📅 Expiries: 52
-📈 Contracts: 2,450
-🕐 Historical Candles: 1,234,567
+Instruments: 1
+Expiries: 52
+Contracts: 2,450
+Historical Candles: 1,234,567   (DuckDB / market_data.duckdb)
 --------------------------------------------------
-⏳ Pending Expiries: 0
-⏳ Pending Contracts: 45
+Pending Expiries: 0
+Pending Contracts: 45
 ==================================================
-
-💾 Database Size: 234.56 MB
+SQLite metadata: data/expirytrack.db
+DuckDB market data: data/market_data.duckdb
 ```
 
 ### Monitor Rate Limits
@@ -170,13 +189,20 @@ MAX_WORKERS=5  # Reduce from 10
 
 ### Database Lock Errors
 
-For SQLite lock issues:
-1. Ensure only one instance is running
-2. The application uses WAL mode to minimize locks
-3. If persistent, restart collection:
-```bash
-python main.py resume
-```
+ExpiryTrack uses two databases:
+
+* SQLite (`data/expirytrack.db`) — WAL mode, multiple readers + one writer.
+* DuckDB (`data/market_data.duckdb`) — DuckDB allows only one read-write
+  process per file across the OS.
+
+If you see *"Cannot open file ... process cannot access"* on the DuckDB
+file, the Flask app is already running and another script (a test, a
+notebook) is trying to open the same file. **Stop the Flask app first**
+(or open the DuckDB file read-only in your script: `duckdb.connect(path,
+read_only=True)`).
+
+Within the Flask process, MarketDataStore uses a single shared connection
+across collector, exporter, and `/query` so they never deadlock.
 
 ### Missing Data
 
@@ -193,13 +219,22 @@ python main.py get-contracts --instrument "NSE_INDEX|Nifty 50" --expiry "2025-08
 
 ## Advanced Configuration
 
-### Using DuckDB (Coming Soon)
+### Re-clustering for fast reads after large loads
 
-For better analytics performance with large datasets:
-```env
-DB_TYPE=duckdb
-DB_PATH=./data/expirytrack.duckdb
+After ingesting a lot of new contracts (e.g., a fresh 6-month collection),
+the rows in `market_data.duckdb` are in insertion order — not in the order
+queries filter on. Running `MarketDataStore.compact()` once rewrites the
+table sorted by `(base_symbol, expiry_date, contract_type, strike_price,
+openalgo_symbol, ts)`. After that, zone-maps line up with the columns
+queries filter on and big scans get noticeably faster.
+
+```python
+from src.database import MarketDataStore
+MarketDataStore.instance().compact()
 ```
+
+`compact()` is safe to call repeatedly. It's expensive (rewrites the whole
+table), so run it after a big batch and not after every contract.
 
 ### Custom Rate Limits
 

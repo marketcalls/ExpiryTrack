@@ -2,7 +2,23 @@
 
 ## Executive Summary
 
-ExpiryTrack is a modern web-based financial data management application designed to capture, store, and manage historical trading data for expired derivative contracts (Futures and Options) from the Upstox trading platform. The application features an intuitive web interface with a step-by-step collection wizard, real-time progress monitoring, and zero-configuration setup. It focuses on building a comprehensive time-series database of 1-minute interval historical data for expired contracts, collecting the last 3 months of data before each contract's expiry.
+ExpiryTrack is a web-based financial data management application that
+captures, stores, and analyzes historical trading data for expired
+derivative contracts (Futures and Options) from the Upstox trading
+platform. The application features an intuitive web interface with a
+step-by-step collection wizard, real-time progress monitoring, and a
+**two-database storage backend**:
+
+* **SQLite** for OLTP config (credentials, instruments, contracts, jobs).
+* **DuckDB** for analytical OHLCV+OI storage — columnar, vectorized,
+  zone-skipping, with cross-DB joins to SQLite metadata, native Parquet
+  export, and an in-app SQL console at `/query`.
+
+It focuses on building a comprehensive time-series database of 1-minute
+interval historical data for expired contracts, collecting the last 3
+months of data before each contract's expiry, and exposing it for
+backtesting and scanning through a pandas-DataFrame API
+(`src.backtest`).
 
 ## Product Vision
 
@@ -47,12 +63,14 @@ ExpiryTrack automates the entire workflow of:
   - Contract specifications
 
 ### 3. Historical Data Collection
-- Retrieves 1-minute interval OHLCV data
+- Retrieves 1-minute interval OHLCV+OI data
 - **3-Month Historical Range**: Downloads last 3 months of data before expiry
 - Includes Open Interest tracking
-- Supports multiple timeframes (1min, 3min, 5min, 15min, 30min)
+- Supports multiple timeframes (1m, 3m, 5m, 15m, 30m, 1h, 1d) via DuckDB views
 - Real-time progress monitoring with detailed logs
 - Handles large-scale data efficiently with async processing
+- **DuckDB-backed bulk ingestion** (~270k rows/sec) via vectorized
+  DataFrame inserts — 10-100x faster than per-row SQL on a columnar engine
 
 ### 4. Web Interface
 - **4-Step Collection Wizard**: Intuitive guided process

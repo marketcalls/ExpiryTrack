@@ -45,14 +45,21 @@ The web interface provides a 4-step wizard for intuitive data export:
 
 ### 3. Data Exporter Module (`src/export/exporter.py`)
 
-Core export logic with the following methods:
+Backed by DuckDB. The exporter builds a parameterized SQL query that
+matches the user's instruments / expiries / options selection, runs it as
+a single bulk read against `market_data.duckdb` (returning a pandas
+DataFrame via Arrow), and serializes from there.
 
 ```python
 class DataExporter:
-    def export_to_csv()   # CSV format with OpenAlgo symbols
-    def export_to_json()  # Structured JSON with metadata
-    def export_to_zip()   # Compressed archive with multiple files
+    def export_to_csv()      # CSV: writes the materialized DataFrame
+    def export_to_json()     # Structured JSON grouped by instrument/expiry
+    def export_to_zip()      # ZIP of per-(instrument, expiry[, type]) CSVs
+    def export_to_parquet()  # Direct DuckDB COPY ... TO ... PARQUET (fastest)
 ```
+
+Because DuckDB returns Arrow-backed DataFrames, even multi-million-row
+exports are extracted in seconds — no per-row Python overhead.
 
 ## Data Format Specifications
 

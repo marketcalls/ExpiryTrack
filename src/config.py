@@ -6,6 +6,12 @@ import os
 from pathlib import Path
 from typing import Optional
 
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 class Config:
     """Application configuration with zero-config defaults"""
 
@@ -13,10 +19,14 @@ class Config:
     BASE_DIR: Path = Path(__file__).parent.parent
     DATA_DIR: Path = BASE_DIR / 'data'
     LOGS_DIR: Path = BASE_DIR / 'logs'
-    DB_PATH: Path = DATA_DIR / 'expirytrack.db'
+    EXPORTS_DIR: Path = BASE_DIR / 'exports'
 
-    # Database settings
-    DB_TYPE: str = 'sqlite'  # Default to SQLite
+    # SQLite holds config / metadata only (credentials, instruments, contracts, jobs)
+    DB_PATH: Path = DATA_DIR / 'expirytrack.db'
+    DB_TYPE: str = 'sqlite'
+
+    # DuckDB holds all OHLCV+OI market data (high-volume, analytical)
+    MARKET_DATA_DB_PATH: Path = DATA_DIR / 'market_data.duckdb'
 
     # Upstox API (loaded from database, not .env)
     UPSTOX_BASE_URL: str = 'https://api.upstox.com/v2'
@@ -53,6 +63,7 @@ class Config:
         # Create necessary directories
         self.DATA_DIR.mkdir(exist_ok=True, parents=True)
         self.LOGS_DIR.mkdir(exist_ok=True, parents=True)
+        self.EXPORTS_DIR.mkdir(exist_ok=True, parents=True)
 
         # Optional: Override with environment variables if present
         self._load_env_overrides()
@@ -69,6 +80,21 @@ class Config:
         if os.getenv('HISTORICAL_MONTHS'):
             self.HISTORICAL_MONTHS = int(os.getenv('HISTORICAL_MONTHS'))
 
+        # Database paths (resolved relative to BASE_DIR if not absolute).
+        if os.getenv('DATABASE_PATH'):
+            self.DB_PATH = self._resolve_path(os.getenv('DATABASE_PATH'))
+        if os.getenv('MARKET_DATA_DB_PATH'):
+            self.MARKET_DATA_DB_PATH = self._resolve_path(
+                os.getenv('MARKET_DATA_DB_PATH')
+            )
+
+    def _resolve_path(self, raw: str) -> Path:
+        """Resolve a path string, anchoring relative paths at BASE_DIR."""
+        p = Path(raw)
+        if not p.is_absolute():
+            p = self.BASE_DIR / p
+        return p
+
     @classmethod
     def validate(cls) -> bool:
         """Validate configuration"""
@@ -81,14 +107,15 @@ class Config:
 
     @classmethod
     def get_db_url(cls) -> str:
-        """Get database connection URL"""
+        """SQLite connection URL for the metadata database."""
         instance = cls()
-        if instance.DB_TYPE == 'sqlite':
-            return f"sqlite:///{instance.DB_PATH}"
-        elif instance.DB_TYPE == 'duckdb':
-            return f"duckdb:///{instance.DB_PATH}"
-        else:
-            raise ValueError(f"Unsupported database type: {instance.DB_TYPE}")
+        return f"sqlite:///{instance.DB_PATH}"
+
+    @classmethod
+    def get_market_data_url(cls) -> str:
+        """DuckDB connection URL for the market data store."""
+        instance = cls()
+        return f"duckdb:///{instance.MARKET_DATA_DB_PATH}"
 
 # Create singleton instance
 config = Config()

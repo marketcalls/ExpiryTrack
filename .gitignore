@@ -170,9 +170,15 @@ data/*.db-shm
 data/*.db-wal
 data/*.sqlite
 data/*.sqlite3
+data/*.duckdb
+data/*.duckdb.wal
+data/*.duckdb-shm
+data/*.duckdb-wal
 *.db
 *.sqlite
 *.sqlite3
+*.duckdb
+*.duckdb.wal
 
 # Log files
 logs/*.log
@@ -224,8 +230,10 @@ exports/*.parquet
 .ipynb_checkpoints/
 *.ipynb
 scratch/
-test_*.py
 debug_*.py
+# Scratch test scripts at the project root only; the proper test/ package
+# (test/test_*.py) is committed.
+/test_*.py
 
 # Documentation build
 docs/_build/

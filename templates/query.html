@@ -1,0 +1,195 @@
+{% extends "base.html" %}
+{% block title %}Query / Scan - ExpiryTrack{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+
+    <!-- Header / store summary -->
+    <div class="card-minimal p-6">
+        <div class="flex items-start justify-between gap-4 flex-wrap">
+            <div>
+                <h1 class="text-2xl font-bold supabase-text-gradient">DuckDB Query / Scan</h1>
+                <p class="text-sm text-gray-600 mt-1">
+                    Run read-only SQL over <code class="bg-gray-100 px-1 rounded">market_data</code> (DuckDB).
+                    Cross-database joins to SQLite metadata are available as <code class="bg-gray-100 px-1 rounded">meta.contracts</code>,
+                    <code class="bg-gray-100 px-1 rounded">meta.expiries</code>, <code class="bg-gray-100 px-1 rounded">meta.instruments</code>.
+                </p>
+            </div>
+            <div class="text-sm text-gray-700">
+                <div><span class="font-medium">Candles:</span> {{ '{:,}'.format(store_summary.total_candles or 0) }}</div>
+                <div><span class="font-medium">Contracts:</span> {{ store_summary.contracts_with_data or 0 }}</div>
+                <div><span class="font-medium">Underlyings:</span> {{ store_summary.unique_symbols or 0 }}</div>
+                {% if store_summary.min_ts %}<div><span class="font-medium">Range:</span> {{ store_summary.min_ts }} - {{ store_summary.max_ts }}</div>{% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- Editor + presets -->
+    <div class="grid grid-cols-1 lg:grid-cols-4 gap-6">
+        <div class="card-minimal p-4 lg:col-span-1">
+            <h2 class="text-sm font-semibold text-gray-700 mb-3">Saved queries</h2>
+            <ul class="space-y-1">
+                {% for p in presets %}
+                <li>
+                    <button class="preset-btn w-full text-left text-sm px-2 py-1.5 rounded hover:bg-gray-100"
+                            data-sql="{{ p.sql|e }}">
+                        {{ p.name }}
+                    </button>
+                </li>
+                {% endfor %}
+            </ul>
+            <hr class="my-3">
+            <h2 class="text-sm font-semibold text-gray-700 mb-2">Schema</h2>
+            <pre class="text-xs bg-gray-50 p-2 rounded overflow-x-auto"><code>market_data(
+  expired_instrument_key,
+  openalgo_symbol,
+  base_symbol,
+  instrument_key,
+  expiry_date DATE,
+  contract_type,
+  strike_price DOUBLE,
+  trading_symbol,
+  ts TIMESTAMPTZ,
+  open, high, low, close DOUBLE,
+  volume BIGINT,
+  oi BIGINT
+)
+
+-- resampled views
+market_data_5m, _15m, _30m,
+market_data_1h, _1d</code></pre>
+        </div>
+
+        <div class="lg:col-span-3 space-y-4">
+            <div class="card-minimal p-4">
+                <textarea id="sql-editor"
+                          class="w-full h-56 font-mono text-sm p-3 border border-gray-200 rounded bg-gray-50"
+                          spellcheck="false"
+                          placeholder="SELECT ..."></textarea>
+                <div class="flex flex-wrap items-center gap-2 mt-3">
+                    <button id="run-btn" class="btn-supabase">Run (Ctrl+Enter)</button>
+                    <button id="dl-csv-btn"  class="btn-supabase" style="background:#374151">Download CSV</button>
+                    <button id="dl-pq-btn"   class="btn-supabase" style="background:#374151">Download Parquet</button>
+                    <span class="ml-auto text-sm text-gray-600">
+                        Row limit:
+                        <input id="row-limit" type="number" value="1000" min="1" max="100000"
+                               class="w-24 ml-1 px-2 py-1 border border-gray-200 rounded text-sm">
+                    </span>
+                </div>
+            </div>
+
+            <div id="status" class="text-sm text-gray-600"></div>
+
+            <div class="card-minimal p-0 overflow-hidden">
+                <div class="overflow-auto" style="max-height: 60vh;">
+                    <table id="result-table" class="w-full text-sm">
+                        <thead class="bg-gray-50 sticky top-0"></thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<script>
+(function () {
+    const editor   = document.getElementById('sql-editor');
+    const runBtn   = document.getElementById('run-btn');
+    const csvBtn   = document.getElementById('dl-csv-btn');
+    const pqBtn    = document.getElementById('dl-pq-btn');
+    const rowLimit = document.getElementById('row-limit');
+    const statusEl = document.getElementById('status');
+    const table    = document.getElementById('result-table');
+    const thead    = table.querySelector('thead');
+    const tbody    = table.querySelector('tbody');
+
+    // Wire up presets.
+    document.querySelectorAll('.preset-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            editor.value = btn.dataset.sql;
+            editor.focus();
+        });
+    });
+
+    function render(columns, rows, info) {
+        thead.innerHTML = '<tr>' + columns.map(c =>
+            '<th class="text-left px-3 py-2 font-medium text-gray-700 border-b border-gray-200">' + c + '</th>'
+        ).join('') + '</tr>';
+        tbody.innerHTML = rows.map(r => (
+            '<tr class="border-b border-gray-100">' +
+            r.map(v => '<td class="px-3 py-1.5 font-mono">' + (v === null ? '<span class="text-gray-400">NULL</span>' : String(v)) + '</td>').join('') +
+            '</tr>'
+        )).join('');
+        statusEl.textContent = info;
+    }
+
+    async function runQuery() {
+        const sql = editor.value.trim();
+        if (!sql) return;
+        statusEl.textContent = 'Running...';
+        try {
+            const res = await fetch('/api/query/run', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({sql, row_limit: parseInt(rowLimit.value || '1000', 10)}),
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                statusEl.innerHTML = '<span class="text-red-600">' + (data.error || 'Query failed') + '</span>';
+                thead.innerHTML = ''; tbody.innerHTML = '';
+                return;
+            }
+            const truncMsg = data.truncated
+                ? '  (showing ' + data.returned + ' of ' + data.row_count + ' rows; raise row limit or download)'
+                : '';
+            render(data.columns, data.rows, data.row_count + ' rows' + truncMsg);
+        } catch (e) {
+            statusEl.innerHTML = '<span class="text-red-600">' + e.message + '</span>';
+        }
+    }
+
+    async function downloadAs(fmt) {
+        const sql = editor.value.trim();
+        if (!sql) return;
+        statusEl.textContent = 'Preparing ' + fmt.toUpperCase() + ' export...';
+        try {
+            const res = await fetch('/api/query/export', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({sql, format: fmt}),
+            });
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({error: 'Export failed'}));
+                statusEl.innerHTML = '<span class="text-red-600">' + (err.error || 'Export failed') + '</span>';
+                return;
+            }
+            const blob = await res.blob();
+            const url  = URL.createObjectURL(blob);
+            const a    = document.createElement('a');
+            a.href = url;
+            a.download = 'query.' + fmt;
+            document.body.appendChild(a); a.click(); a.remove();
+            URL.revokeObjectURL(url);
+            statusEl.textContent = 'Export downloaded.';
+        } catch (e) {
+            statusEl.innerHTML = '<span class="text-red-600">' + e.message + '</span>';
+        }
+    }
+
+    runBtn.addEventListener('click', runQuery);
+    csvBtn.addEventListener('click', () => downloadAs('csv'));
+    pqBtn .addEventListener('click', () => downloadAs('parquet'));
+    editor.addEventListener('keydown', (e) => {
+        if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+            e.preventDefault(); runQuery();
+        }
+    });
+
+    // Seed editor with the first preset.
+    const first = document.querySelector('.preset-btn');
+    if (first) editor.value = first.dataset.sql;
+})();
+</script>
+{% endblock %}
