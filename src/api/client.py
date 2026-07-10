@@ -99,32 +99,52 @@ class UpstoxAPIClient:
         # Get headers with auth token
         headers = self.auth_manager.get_headers()
 
-        # Apply rate limiting
-        await self.rate_limiter.acquire_with_priority(priority)
+        max_retries = config.MAX_REQUEST_RETRIES
+        response = None
 
-        try:
-            response = await self._client.request(
-                method=method,
-                url=endpoint,
-                params=params,
-                json=data,
-                headers=headers
-            )
+        for attempt in range(max_retries + 1):
+            # Apply rate limiting (also waits out any active 429 cooldown)
+            await self.rate_limiter.acquire_with_priority(priority)
 
-            # Handle rate limit response
-            await self.rate_limiter.handle_response(
-                response.status_code,
-                dict(response.headers)
-            )
+            try:
+                response = await self._client.request(
+                    method=method,
+                    url=endpoint,
+                    params=params,
+                    json=data,
+                    headers=headers
+                )
+            except httpx.TimeoutException as e:
+                if attempt < max_retries:
+                    logger.warning(f"Request timeout for {endpoint}, "
+                                   f"retrying ({attempt + 1}/{max_retries})")
+                    continue
+                logger.error(f"Request timeout: {e}")
+                raise
+            except Exception as e:
+                logger.error(f"Request failed: {e}")
+                raise
 
+            if response.status_code == 429:
+                retry_after = None
+                try:
+                    retry_after = float(response.headers.get('retry-after'))
+                except (TypeError, ValueError):
+                    pass
+
+                wait = self.rate_limiter.register_rate_limit_hit(retry_after)
+                if attempt < max_retries:
+                    logger.warning(f"Rate limited (429) on {endpoint}, cooling down "
+                                   f"{wait:.0f}s before retry {attempt + 1}/{max_retries}")
+                    continue
+                logger.error(f"Rate limited (429) on {endpoint}, giving up "
+                             f"after {max_retries} retries")
+                return response
+
+            self.rate_limiter.register_success()
             return response
 
-        except httpx.TimeoutException as e:
-            logger.error(f"Request timeout: {e}")
-            raise
-        except Exception as e:
-            logger.error(f"Request failed: {e}")
-            raise
+        return response
 
     async def get_expiries(self, instrument_key: str) -> List[str]:
         """

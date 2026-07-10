@@ -234,11 +234,6 @@ def api_collect_status(task_id):
 
     status = task_manager.get_task_status(task_id)
     if status:
-        # Debug log to see what's being returned
-        logs_count = len(status.get('logs', []))
-        print(f"DEBUG: Task {task_id} - Status: {status.get('status')}, Logs count: {logs_count}")
-        if logs_count > 0:
-            print(f"DEBUG: Sample log: {status['logs'][-1]}")
         return jsonify(status)
     else:
         return jsonify({'error': 'Task not found'}), 404
@@ -605,7 +600,7 @@ if __name__ == '__main__':
     extra_files = None
     if '--reload' not in sys.argv:
         # Run without auto-reload in production mode
-        app.run(debug=False, host='127.0.0.1', port=5000)
+        app.run(debug=False, host='127.0.0.1', port=5005)
     else:
         # Development mode with auto-reload (exclude exports directory)
-        app.run(debug=True, use_reloader=False)  # Disable reloader to prevent clearing export_tasks
+        app.run(debug=True, use_reloader=False, port=5005)  # Disable reloader to prevent clearing export_tasks

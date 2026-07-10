@@ -38,6 +38,7 @@ class Config:
     MAX_REQUESTS_MIN: int = 450  # Safety margin below 500
     MAX_REQUESTS_30MIN: int = 1800  # Safety margin below 2000
     REQUEST_TIMEOUT: int = 30
+    MAX_REQUEST_RETRIES: int = 5  # Retries per request on 429/timeout
 
     # Performance defaults
     BATCH_SIZE: int = 5000

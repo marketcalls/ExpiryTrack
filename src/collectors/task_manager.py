@@ -167,6 +167,10 @@ class TaskManager:
 
                 # Process each instrument
                 for instrument_name in instruments:
+                    if task.status == TaskStatus.CANCELLED:
+                        task.add_log("Collection stopped by user", "warning")
+                        return
+
                     instrument_key = get_instrument_key(instrument_name)
                     instrument_expiries = expiries.get(instrument_name, [])
 
@@ -175,6 +179,10 @@ class TaskManager:
 
                     # Process each expiry
                     for expiry_date in instrument_expiries:
+                        if task.status == TaskStatus.CANCELLED:
+                            task.add_log("Collection stopped by user", "warning")
+                            return
+
                         task.current_action = f"Fetching contracts for {instrument_name} - {expiry_date}"
                         task.add_log(f"Processing expiry {expiry_date}", "info")
 
@@ -211,6 +219,10 @@ class TaskManager:
                                 # Batch process contracts
                                 batch_size = min(workers, 10)
                                 for i in range(0, len(contracts_to_process), batch_size):
+                                    if task.status == TaskStatus.CANCELLED:
+                                        task.add_log("Collection stopped by user", "warning")
+                                        return
+
                                     batch = contracts_to_process[i:i + batch_size]
 
                                     # Process batch concurrently

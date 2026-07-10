@@ -1,19 +1,44 @@
 """
 Rate limiter implementation for Upstox API compliance
-Limits: 50 req/sec, 500 req/min, 2000 req/30min
+Limits (Standard APIs, per user): 50 req/sec, 500 req/min, 2000 req/30min
 """
 import asyncio
+import threading
 import time
 from collections import deque
-from typing import Optional, Dict, Tuple
+from typing import Optional, Dict
 import logging
 
 logger = logging.getLogger(__name__)
 
 class UpstoxRateLimiter:
     """
-    Rate limiter that enforces Upstox API limits with safety margins
+    Rate limiter that enforces Upstox API limits with safety margins.
+
+    Upstox applies rate limits per user, not per connection, so all limiter
+    instances in this process share one set of sliding windows (class-level
+    state). The state is guarded by a threading.Lock that is only held for
+    bookkeeping - never across a sleep - which makes the limiter safe to use
+    from multiple event loops and threads (Flask routes, the task manager
+    loop, CLI scripts).
+
+    A 429 from the server starts a shared cooldown that pauses every request
+    in the process until it expires, instead of each coroutine sleeping on
+    its own while others keep firing.
     """
+
+    _state_lock = threading.Lock()
+    _windows: Dict[str, deque] = {
+        'second': deque(),
+        'minute': deque(),
+        'half_hour': deque(),
+    }
+    _cooldown_until: float = 0.0
+    _consecutive_429: int = 0
+    _counters = {
+        'request_count': 0,
+        'error_count': 0,
+    }
 
     def __init__(self,
                  max_per_second: int = 45,
@@ -33,82 +58,105 @@ class UpstoxRateLimiter:
             'half_hour': (max_per_30min, 1800.0)
         }
 
-        self.windows = {
-            'second': deque(),
-            'minute': deque(),
-            'half_hour': deque()
-        }
-
-        self.lock = asyncio.Lock()
-        self.request_count = 0
-        self.error_count = 0
-        self.backoff_factor = 1.0
-
     async def acquire(self, priority: int = 1) -> None:
         """
-        Wait if necessary to respect rate limits
+        Wait if necessary to respect rate limits and any active 429 cooldown.
 
         Args:
-            priority: Request priority (lower = higher priority)
+            priority: Request priority (kept for API compatibility)
         """
-        async with self.lock:
-            now = time.time()
+        cls = UpstoxRateLimiter
+        reported = False
 
-            # Clean old timestamps from windows
-            for window_name, (limit, duration) in self.limits.items():
-                window = self.windows[window_name]
-                while window and now - window[0] > duration:
-                    window.popleft()
+        while True:
+            with cls._state_lock:
+                now = time.monotonic()
+                wait = cls._cooldown_until - now
+                reason = "server cooldown after 429"
 
-            # Check if we need to wait
-            wait_time = 0.0
-            for window_name, (limit, duration) in self.limits.items():
-                window = self.windows[window_name]
-                effective_limit = int(limit / self.backoff_factor)
+                if wait <= 0:
+                    wait = 0.0
+                    for window_name, (limit, duration) in self.limits.items():
+                        window = cls._windows[window_name]
+                        while window and now - window[0] > duration:
+                            window.popleft()
 
-                if len(window) >= effective_limit:
-                    oldest = window[0]
-                    wait_needed = duration - (now - oldest) + 0.01
-                    wait_time = max(wait_time, wait_needed)
+                        if len(window) >= limit:
+                            wait_needed = duration - (now - window[0]) + 0.05
+                            if wait_needed > wait:
+                                wait = wait_needed
+                                reason = (f"{window_name} window full "
+                                          f"({len(window)}/{limit})")
 
-                    logger.debug(f"Rate limit {window_name}: {len(window)}/{effective_limit}, "
-                               f"waiting {wait_needed:.2f}s")
+                    if wait <= 0:
+                        for window in cls._windows.values():
+                            window.append(now)
+                        cls._counters['request_count'] += 1
+                        return
 
-            if wait_time > 0:
-                logger.info(f"Rate limit reached, waiting {wait_time:.2f}s")
-                await asyncio.sleep(wait_time)
-                now = time.time()
+            if not reported and wait > 5:
+                logger.info(f"Rate limit: {reason}, waiting {wait:.0f}s")
+                reported = True
+            else:
+                logger.debug(f"Rate limit: {reason}, waiting {wait:.2f}s")
 
-            # Record the request timestamp
-            for window in self.windows.values():
-                window.append(now)
+            # Sleep outside the lock, in bounded chunks, then re-check.
+            await asyncio.sleep(min(wait, 30.0))
 
-            self.request_count += 1
+    def register_rate_limit_hit(self, retry_after: Optional[float] = None) -> float:
+        """
+        Record a 429 response and start a process-wide cooldown.
+
+        Args:
+            retry_after: Server-provided Retry-After seconds, if any
+
+        Returns:
+            The cooldown duration in seconds
+        """
+        cls = UpstoxRateLimiter
+        with cls._state_lock:
+            cls._counters['error_count'] += 1
+            cls._consecutive_429 += 1
+
+            if retry_after is None or retry_after <= 0:
+                # Exponential backoff: 15s, 30s, 60s... capped at 5 minutes
+                retry_after = min(15.0 * (2 ** (cls._consecutive_429 - 1)), 300.0)
+
+            until = time.monotonic() + retry_after
+            if until > cls._cooldown_until:
+                cls._cooldown_until = until
+
+            return retry_after
+
+    def register_success(self) -> None:
+        """Record a successful response, ending any escalating backoff."""
+        cls = UpstoxRateLimiter
+        with cls._state_lock:
+            cls._consecutive_429 = 0
 
     async def handle_response(self, status_code: int, headers: Optional[Dict] = None) -> None:
         """
-        Handle API response and adjust rate limiting if needed
+        Handle API response and adjust rate limiting if needed.
+        Non-blocking: a 429 starts the shared cooldown that acquire() honors.
 
         Args:
             status_code: HTTP status code
             headers: Response headers
         """
-        if status_code == 429:  # Rate limit exceeded
-            self.error_count += 1
-            self.backoff_factor = min(2.0, 1.0 + (self.error_count * 0.1))
-
-            # Get retry-after header if available
-            retry_after = 60  # Default wait time
-            if headers and 'retry-after' in headers:
-                retry_after = int(headers['retry-after'])
-
-            logger.warning(f"Rate limit exceeded (429), backing off for {retry_after}s")
-            await asyncio.sleep(retry_after)
-
-        elif status_code < 400:  # Successful request
-            if self.error_count > 0:
-                self.error_count -= 1
-                self.backoff_factor = max(1.0, self.backoff_factor - 0.05)
+        if status_code == 429:
+            retry_after = None
+            if headers:
+                for key, value in headers.items():
+                    if key.lower() == 'retry-after':
+                        try:
+                            retry_after = float(value)
+                        except (TypeError, ValueError):
+                            pass
+                        break
+            wait = self.register_rate_limit_hit(retry_after)
+            logger.warning(f"Rate limit exceeded (429), cooling down for {wait:.0f}s")
+        elif status_code < 400:
+            self.register_success()
 
     def get_usage_stats(self) -> Dict[str, Dict]:
         """
@@ -117,34 +165,39 @@ class UpstoxRateLimiter:
         Returns:
             Dictionary with usage stats for each time window
         """
-        now = time.time()
+        cls = UpstoxRateLimiter
         stats = {}
 
-        for window_name, (limit, duration) in self.limits.items():
-            window = self.windows[window_name]
-            recent = sum(1 for ts in window if now - ts <= duration)
+        with cls._state_lock:
+            now = time.monotonic()
+            for window_name, (limit, duration) in self.limits.items():
+                window = cls._windows[window_name]
+                recent = sum(1 for ts in window if now - ts <= duration)
 
-            stats[window_name] = {
-                'used': recent,
-                'limit': int(limit / self.backoff_factor),
-                'original_limit': limit,
-                'percentage': (recent / limit) * 100 if limit > 0 else 0,
-                'remaining': max(0, int(limit / self.backoff_factor) - recent)
-            }
+                stats[window_name] = {
+                    'used': recent,
+                    'limit': limit,
+                    'original_limit': limit,
+                    'percentage': (recent / limit) * 100 if limit > 0 else 0,
+                    'remaining': max(0, limit - recent)
+                }
 
-        stats['total_requests'] = self.request_count
-        stats['error_count'] = self.error_count
-        stats['backoff_factor'] = self.backoff_factor
+            stats['total_requests'] = cls._counters['request_count']
+            stats['error_count'] = cls._counters['error_count']
+            stats['cooldown_seconds'] = round(max(0.0, cls._cooldown_until - now), 1)
 
         return stats
 
     def reset(self) -> None:
         """Reset all rate limit windows and counters"""
-        for window in self.windows.values():
-            window.clear()
-        self.request_count = 0
-        self.error_count = 0
-        self.backoff_factor = 1.0
+        cls = UpstoxRateLimiter
+        with cls._state_lock:
+            for window in cls._windows.values():
+                window.clear()
+            cls._counters['request_count'] = 0
+            cls._counters['error_count'] = 0
+            cls._consecutive_429 = 0
+            cls._cooldown_until = 0.0
         logger.info("Rate limiter reset")
 
     def print_dashboard(self) -> None:
@@ -158,57 +211,32 @@ class UpstoxRateLimiter:
         for window_name in ['second', 'minute', 'half_hour']:
             if window_name in stats:
                 s = stats[window_name]
-                bar_length = 20
-                filled = int(bar_length * s['percentage'] / 100)
-                bar = '█' * filled + '░' * (bar_length - filled)
-
                 window_display = window_name.replace('_', ' ').title()
-                print(f"{window_display:10s}: [{bar}] {s['used']}/{s['limit']} "
+                print(f"{window_display:10s}: {s['used']}/{s['limit']} "
                       f"({s['percentage']:.1f}%)")
 
         print("-"*50)
         print(f"Total Requests: {stats['total_requests']:,}")
         print(f"Errors: {stats['error_count']}")
-        if stats['backoff_factor'] > 1.0:
-            print(f"⚠️  Backoff Active: {stats['backoff_factor']:.2f}x")
+        if stats['cooldown_seconds'] > 0:
+            print(f"Cooldown Active: {stats['cooldown_seconds']}s remaining")
         print("="*50 + "\n")
 
 class PriorityRateLimiter(UpstoxRateLimiter):
     """
-    Rate limiter with priority queue support
-    """
+    Backward-compatible subclass.
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.priority_queue = asyncio.PriorityQueue()
-        self.processing = False
-        self._counter = 0
+    The previous priority-queue implementation could strand a waiter forever
+    when the queue processor exited between a put() and the processing-flag
+    check, hanging the collection. Requests now go straight to acquire(),
+    which already serializes waiters fairly.
+    """
 
     async def acquire_with_priority(self, priority: int = 5) -> None:
         """
-        Acquire rate limit slot with priority
+        Acquire rate limit slot
 
         Args:
-            priority: Request priority (1=highest, 10=lowest)
+            priority: Request priority (kept for API compatibility)
         """
-        event = asyncio.Event()
-        # Add a unique counter to ensure tuples are always comparable
-        counter = self._counter
-        self._counter += 1
-        await self.priority_queue.put((priority, time.time(), counter, event))
-
-        if not self.processing:
-            asyncio.create_task(self._process_queue())
-
-        await event.wait()
-
-    async def _process_queue(self) -> None:
-        """Process priority queue"""
-        self.processing = True
-
-        while not self.priority_queue.empty():
-            priority, timestamp, counter, event = await self.priority_queue.get()
-            await self.acquire()
-            event.set()
-
-        self.processing = False
+        await self.acquire(priority)
