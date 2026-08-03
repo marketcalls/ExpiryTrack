@@ -268,7 +268,7 @@ class UpstoxAPIClient:
             return candles
         else:
             logger.error(f"Failed to fetch historical data for {expired_instrument_key}: {response.status_code} - {response.text[:200]}")
-            return []
+            return None
 
     async def get_all_contracts_for_expiry(self,
                                           instrument_key: str,

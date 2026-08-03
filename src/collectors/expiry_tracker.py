@@ -144,7 +144,7 @@ class ExpiryTracker:
 
         for contract in pbar:
             try:
-                expired_key = contract.get('instrument_key', '')
+                expired_key = contract.get('expired_instrument_key') or contract.get('instrument_key', '')
                 pbar.set_description(f"Processing {contract.get('trading_symbol', expired_key)}")
 
                 # Check if already fully fetched
@@ -166,6 +166,7 @@ class ExpiryTracker:
                         
                         # If we already have data past the end date, skip
                         if datetime.strptime(adjusted_from, '%Y-%m-%d') > datetime.strptime(to_date, '%Y-%m-%d'):
+                            self.db_manager.insert_historical_data(expired_key, [])
                             continue
                             
                         # Update from_date to only fetch the missing delta
@@ -180,6 +181,10 @@ class ExpiryTracker:
                     to_date,
                     interval
                 )
+                
+                # If API returned None, it was an error (e.g. auth, rate limit after retries). Leave pending.
+                if candles is None:
+                    continue
 
                 # Store in database (manager handles marking data_fetched=TRUE even if empty)
                 count = self.db_manager.insert_historical_data(expired_key, candles)
