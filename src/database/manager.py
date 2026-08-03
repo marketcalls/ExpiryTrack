@@ -401,11 +401,24 @@ class DatabaseManager:
                     openalgo_symbol = to_openalgo_symbol(contract)
 
                     cursor.execute("""
-                        INSERT OR REPLACE INTO contracts
+                        INSERT INTO contracts
                         (expired_instrument_key, instrument_key, expiry_date,
                          contract_type, strike_price, trading_symbol, openalgo_symbol,
                          lot_size, tick_size, exchange_token, freeze_quantity, minimum_lot, metadata)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(expired_instrument_key) DO UPDATE SET
+                            instrument_key=excluded.instrument_key,
+                            expiry_date=excluded.expiry_date,
+                            contract_type=excluded.contract_type,
+                            strike_price=excluded.strike_price,
+                            trading_symbol=excluded.trading_symbol,
+                            openalgo_symbol=excluded.openalgo_symbol,
+                            lot_size=excluded.lot_size,
+                            tick_size=excluded.tick_size,
+                            exchange_token=excluded.exchange_token,
+                            freeze_quantity=excluded.freeze_quantity,
+                            minimum_lot=excluded.minimum_lot,
+                            metadata=excluded.metadata
                     """, (
                         expired_key,
                         contract.get('underlying_key', ''),
@@ -452,7 +465,20 @@ class DatabaseManager:
         Insert OHLCV+OI candles for one contract into the DuckDB store and
         flip its `data_fetched` flag in SQLite.
         """
+        expired_key = (
+            contract.get("expired_instrument_key")
+            or contract.get("instrument_key", "")
+        )
+
         if not candles:
+            # Mark as fetched even if there is no data to prevent infinite retries
+            if expired_key:
+                with self.get_connection() as conn:
+                    cur = conn.cursor()
+                    cur.execute(
+                        "UPDATE contracts SET data_fetched = TRUE WHERE expired_instrument_key = ?",
+                        (expired_key,),
+                    )
             return 0
 
         # Make sure the contract dict carries the denormalizing fields the
@@ -463,16 +489,13 @@ class DatabaseManager:
         count = self.market_data.insert_candles(contract, candles)
 
         if count:
-            expired_key = (
-                contract.get("expired_instrument_key")
-                or contract.get("instrument_key", "")
-            )
-            with self.get_connection() as conn:
-                cur = conn.cursor()
-                cur.execute(
-                    "UPDATE contracts SET data_fetched = TRUE WHERE expired_instrument_key = ?",
-                    (expired_key,),
-                )
+            if expired_key:
+                with self.get_connection() as conn:
+                    cur = conn.cursor()
+                    cur.execute(
+                        "UPDATE contracts SET data_fetched = TRUE WHERE expired_instrument_key = ?",
+                        (expired_key,),
+                    )
             logger.info(f"Inserted {count} candles for {expired_key} (DuckDB)")
         return count
 

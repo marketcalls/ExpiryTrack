@@ -6,6 +6,7 @@ from typing import List, Dict, Optional, Any
 from datetime import datetime, timedelta, date
 import logging
 from tqdm.asyncio import tqdm
+import pandas as pd
 
 from ..api.client import UpstoxAPIClient
 from ..auth.manager import AuthManager
@@ -143,20 +144,51 @@ class ExpiryTracker:
 
         for contract in pbar:
             try:
-                expired_key = contract.get('instrument_key', '')
+                expired_key = contract.get('expired_instrument_key') or contract.get('instrument_key', '')
                 pbar.set_description(f"Processing {contract.get('trading_symbol', expired_key)}")
+
+                # Check if already fully fetched
+                contract_row = self.db_manager._lookup_contract(expired_key)
+                if contract_row and contract_row.get('data_fetched'):
+                    continue
+
+                # Check DuckDB for max timestamp to do delta fetching
+                current_from_date = from_date
+                try:
+                    # DuckDB Python API requires params= keyword argument
+                    max_ts_df = self.db_manager.market_data.sql(
+                        "SELECT MAX(ts) as max_ts FROM market_data WHERE expired_instrument_key = ?",
+                        params=[expired_key]
+                    )
+                    if not max_ts_df.empty and not pd.isna(max_ts_df['max_ts'].iloc[0]):
+                        max_ts = pd.to_datetime(max_ts_df['max_ts'].iloc[0])
+                        adjusted_from = max_ts.strftime('%Y-%m-%d')
+                        
+                        # If we already have data past the end date, skip
+                        if datetime.strptime(adjusted_from, '%Y-%m-%d') > datetime.strptime(to_date, '%Y-%m-%d'):
+                            self.db_manager.insert_historical_data(expired_key, [])
+                            continue
+                            
+                        # Update from_date to only fetch the missing delta
+                        current_from_date = adjusted_from
+                except Exception as db_err:
+                    logger.debug(f"Could not perform delta check for {expired_key}: {db_err}")
 
                 # Fetch historical data
                 candles = await self.api_client.get_historical_data(
                     expired_key,
-                    from_date,
+                    current_from_date,
                     to_date,
                     interval
                 )
+                
+                # If API returned None, it was an error (e.g. auth, rate limit after retries). Leave pending.
+                if candles is None:
+                    continue
 
-                if candles:
-                    # Store in database
-                    count = self.db_manager.insert_historical_data(expired_key, candles)
+                # Store in database (manager handles marking data_fetched=TRUE even if empty)
+                count = self.db_manager.insert_historical_data(expired_key, candles)
+                if count:
                     total_candles += count
                     self.stats['candles_fetched'] += count
 
