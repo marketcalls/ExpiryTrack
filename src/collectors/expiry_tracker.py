@@ -155,10 +155,10 @@ class ExpiryTracker:
                 # Check DuckDB for max timestamp to do delta fetching
                 current_from_date = from_date
                 try:
-                    # Use param substitution or direct if needed, DuckDB supports standard parameterized queries
+                    # DuckDB Python API requires params= keyword argument
                     max_ts_df = self.db_manager.market_data.sql(
                         "SELECT MAX(ts) as max_ts FROM market_data WHERE expired_instrument_key = ?",
-                        [expired_key]
+                        params=[expired_key]
                     )
                     if not max_ts_df.empty and not pd.isna(max_ts_df['max_ts'].iloc[0]):
                         max_ts = pd.to_datetime(max_ts_df['max_ts'].iloc[0])

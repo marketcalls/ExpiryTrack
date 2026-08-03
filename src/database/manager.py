@@ -401,11 +401,24 @@ class DatabaseManager:
                     openalgo_symbol = to_openalgo_symbol(contract)
 
                     cursor.execute("""
-                        INSERT OR REPLACE INTO contracts
+                        INSERT INTO contracts
                         (expired_instrument_key, instrument_key, expiry_date,
                          contract_type, strike_price, trading_symbol, openalgo_symbol,
                          lot_size, tick_size, exchange_token, freeze_quantity, minimum_lot, metadata)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(expired_instrument_key) DO UPDATE SET
+                            instrument_key=excluded.instrument_key,
+                            expiry_date=excluded.expiry_date,
+                            contract_type=excluded.contract_type,
+                            strike_price=excluded.strike_price,
+                            trading_symbol=excluded.trading_symbol,
+                            openalgo_symbol=excluded.openalgo_symbol,
+                            lot_size=excluded.lot_size,
+                            tick_size=excluded.tick_size,
+                            exchange_token=excluded.exchange_token,
+                            freeze_quantity=excluded.freeze_quantity,
+                            minimum_lot=excluded.minimum_lot,
+                            metadata=excluded.metadata
                     """, (
                         expired_key,
                         contract.get('underlying_key', ''),
